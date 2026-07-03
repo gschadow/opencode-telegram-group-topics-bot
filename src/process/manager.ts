@@ -78,17 +78,17 @@ class ProcessManager implements ProcessManagerInterface {
         windowsHide: isWindows,
       });
 
+      // Register error handler immediately so ENOENT fires here instead of as uncaught exception
+      childProcess.on("error", (err) => {
+        logger.error("[ProcessManager] Process error:", err);
+        this.cleanup();
+      });
+
       if (!childProcess.pid) {
         throw new Error(
           "Failed to start OpenCode server process. Ensure 'opencode' is installed and available in PATH.",
         );
       }
-
-      // Setup event handlers
-      childProcess.on("error", (err) => {
-        logger.error("[ProcessManager] Process error:", err);
-        this.cleanup();
-      });
 
       childProcess.on("exit", (code, signal) => {
         logger.info(`[ProcessManager] Process exited: code=${code}, signal=${signal}`);
