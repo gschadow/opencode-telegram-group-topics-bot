@@ -4,6 +4,7 @@ export const zh: I18nDictionary = {
   "cmd.description.status": "服务器和会话状态",
   "cmd.description.new": "创建新会话",
   "cmd.description.abort": "中止当前操作",
+  "cmd.description.cancel": "关闭菜单或问题而不中止",
   "cmd.description.stop": "停止当前操作",
   "cmd.description.sessions": "列出会话",
   "cmd.description.last": "显示会话的最新消息",

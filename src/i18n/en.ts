@@ -2,6 +2,7 @@ export const en = {
   "cmd.description.status": "Server and session status",
   "cmd.description.new": "Create a new session",
   "cmd.description.abort": "Abort current action",
+  "cmd.description.cancel": "Dismiss menu or question without aborting",
   "cmd.description.stop": "Stop current action",
   "cmd.description.sessions": "List sessions",
   "cmd.description.last": "Show latest session message",

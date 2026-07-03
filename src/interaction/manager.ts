@@ -7,7 +7,7 @@ import type {
 import { INTERACTION_CLEAR_REASON } from "./constants.js";
 import { logger } from "../utils/logger.js";
 
-export const DEFAULT_ALLOWED_INTERACTION_COMMANDS = ["/help", "/status", "/abort"] as const;
+export const DEFAULT_ALLOWED_INTERACTION_COMMANDS = ["/help", "/status", "/abort", "/cancel"] as const;
 
 function normalizeCommand(command: string): string | null {
   const trimmed = command.trim().toLowerCase();

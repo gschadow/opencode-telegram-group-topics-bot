@@ -4,6 +4,7 @@ export const de: I18nDictionary = {
   "cmd.description.status": "Server- und Sitzungsstatus",
   "cmd.description.new": "Neue Sitzung erstellen",
   "cmd.description.abort": "Aktuelle Aktion abbrechen",
+  "cmd.description.cancel": "Menü oder Frage schließen ohne Abbruch",
   "cmd.description.stop": "Aktuelle Aktion stoppen",
   "cmd.description.sessions": "Sitzungen auflisten",
   "cmd.description.last": "Neueste Sitzungsnachricht anzeigen",

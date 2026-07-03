@@ -23,6 +23,7 @@ import { openCommand, handleOpenCallback } from "./commands/open.js";
 import { taskCommand, handleTaskTextAnswer } from "./commands/task.js";
 import { handleTaskListCallback, taskListCommand } from "./commands/tasklist.js";
 import { abortCommand } from "./commands/abort.js";
+import { cancelCommand } from "./commands/cancel.js";
 import { opencodeStartCommand } from "./commands/opencode-start.js";
 import { opencodeStopCommand } from "./commands/opencode-stop.js";
 import { renameCommand, handleRenameCancel, handleRenameTextAnswer } from "./commands/rename.js";
@@ -1348,6 +1349,7 @@ export function createBot(): Bot<Context> {
   bot.command(BOT_COMMAND.SESSIONS, sessionsCommand);
   bot.command(BOT_COMMAND.NEW, createNewCommand({ ensureEventSubscription }));
   bot.command(BOT_COMMAND.ABORT, abortCommand);
+  bot.command(BOT_COMMAND.CANCEL, cancelCommand);
   bot.command(BOT_COMMAND.RENAME, renameCommand);
   bot.command(BOT_COMMAND.COMMANDS, commandsCommand);
   bot.command(BOT_COMMAND.SKILLS, skillsCommand);

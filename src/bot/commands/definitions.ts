@@ -25,6 +25,7 @@ const COMMAND_DEFINITIONS: BotCommandI18nDefinition[] = [
   { command: BOT_COMMAND.STATUS, descriptionKey: "cmd.description.status" },
   { command: BOT_COMMAND.NEW, descriptionKey: "cmd.description.new" },
   { command: BOT_COMMAND.ABORT, descriptionKey: "cmd.description.abort" },
+  { command: BOT_COMMAND.CANCEL, descriptionKey: "cmd.description.cancel" },
   { command: BOT_COMMAND.SESSIONS, descriptionKey: "cmd.description.sessions" },
   { command: BOT_COMMAND.LAST, descriptionKey: "cmd.description.last" },
   { command: BOT_COMMAND.TTS, descriptionKey: "cmd.description.tts" },

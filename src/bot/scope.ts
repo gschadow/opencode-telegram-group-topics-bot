@@ -85,7 +85,13 @@ function buildScopeKey(params: ScopeParams): string {
     return `${DM_SCOPE_PREFIX}${params.chatId}`;
   }
 
-  if (typeof params.threadId === "number") {
+  // Only actual sub-topics get a thread-specific key; GROUP_GENERAL (including
+  // thread ID 1, the implicit "General" topic) always uses the bare chat: prefix
+  // so that the scope key is identical whether derived from a user message
+  // (is_topic_message=true → threadId=1) or from the bot's own reply message
+  // (sent without message_thread_id → threadId=null). Without this, inline-menu
+  // callbacks were always considered "inactive" in General-topic group chats.
+  if (typeof params.threadId === "number" && params.context === SCOPE_CONTEXT.GROUP_TOPIC) {
     return `${params.chatId}:${params.threadId}`;
   }
 

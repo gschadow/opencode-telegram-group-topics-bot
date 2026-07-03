@@ -429,7 +429,7 @@ describe("bot/commands/commands", () => {
           commandName: "poem",
         },
       },
-      "-100777:1",
+      "chat:-100777", // GROUP_GENERAL canonical key (thread 1 → no thread suffix)
     );
 
     const ctx = createGeneralForumCallbackContext("commands:execute", 401);

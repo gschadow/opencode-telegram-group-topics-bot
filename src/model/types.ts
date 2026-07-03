@@ -30,6 +30,9 @@ export interface ModelSelectionLists {
  * @returns Formatted string "providerID/modelID"
  */
 export function formatModelForButton(providerID: string, modelID: string): string {
+  if (!providerID || !modelID) {
+    return "🤖 opencode\ndefault model";
+  }
   // If model name is too long, we only truncate the model part
   const displayModelId = modelID.length > 20 ? `${modelID.substring(0, 17)}...` : modelID;
   const displayProviderId =
@@ -45,5 +48,8 @@ export function formatModelForButton(providerID: string, modelID: string): strin
  * @returns Formatted string "providerID / modelID"
  */
 export function formatModelForDisplay(providerID: string, modelID: string): string {
+  if (!providerID || !modelID) {
+    return "opencode default";
+  }
   return `${providerID} / ${modelID}`;
 }

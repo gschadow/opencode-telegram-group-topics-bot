@@ -4,6 +4,7 @@ export const ru: I18nDictionary = {
   "cmd.description.status": "Статус сервера и сессии",
   "cmd.description.new": "Создать новую сессию",
   "cmd.description.abort": "Прервать текущее действие",
+  "cmd.description.cancel": "Закрыть меню или вопрос без прерывания",
   "cmd.description.stop": "Прервать текущее действие",
   "cmd.description.sessions": "Список сессий",
   "cmd.description.last": "Показать последнее сообщение сессии",
