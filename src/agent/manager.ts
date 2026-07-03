@@ -27,7 +27,7 @@ export async function getAvailableAgents(scopeKey: string = "global"): Promise<A
       return [];
     }
 
-    if (!agents) {
+    if (!Array.isArray(agents)) {
       return [];
     }
 
@@ -64,7 +64,7 @@ export async function fetchCurrentAgent(scopeKey: string = "global"): Promise<st
       return resolveProjectAgent(storedAgent ?? DEFAULT_AGENT, scopeKey);
     }
 
-    const lastAgent = messages[0].info.agent;
+    const lastAgent = messages[0].info?.agent;
     if (storedAgent && lastAgent !== storedAgent) {
       return resolveProjectAgent(storedAgent, scopeKey);
     }
