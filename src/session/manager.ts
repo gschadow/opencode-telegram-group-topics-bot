@@ -29,6 +29,10 @@ function ensureSessionsLoaded(): void {
 
   const scopedSessions = getScopedSessions();
   for (const [scopeKey, sessionInfo] of Object.entries(scopedSessions)) {
+    if (!sessionInfo.id || !sessionInfo.title || !sessionInfo.directory) {
+      logger.warn(`[SessionManager] Skipping invalid session for scope ${scopeKey}: missing id/title/directory`);
+      continue;
+    }
     sessionsByScope.set(scopeKey, sessionInfo);
     scopeBySessionId.set(sessionInfo.id, scopeKey);
   }

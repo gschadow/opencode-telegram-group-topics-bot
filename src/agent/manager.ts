@@ -60,11 +60,11 @@ export async function fetchCurrentAgent(scopeKey: string = "global"): Promise<st
       limit: 1,
     });
 
-    if (error || !messages || messages.length === 0) {
+    if (error || !Array.isArray(messages) || messages.length === 0) {
       return resolveProjectAgent(storedAgent ?? DEFAULT_AGENT, scopeKey);
     }
 
-    const lastAgent = messages[0].info?.agent;
+    const lastAgent = messages[0]?.info?.agent;
     if (storedAgent && lastAgent !== storedAgent) {
       return resolveProjectAgent(storedAgent, scopeKey);
     }
