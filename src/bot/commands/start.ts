@@ -1,5 +1,5 @@
 import { Context } from "grammy";
-import { createDmKeyboard, createMainKeyboard } from "../utils/keyboard.js";
+import { createMainKeyboard, removeKeyboard } from "../utils/keyboard.js";
 import { getStoredAgent, resolveProjectAgent } from "../../agent/manager.js";
 import { getStoredModel } from "../../model/manager.js";
 import { formatVariantForButton } from "../../variant/manager.js";
@@ -21,7 +21,7 @@ export async function startCommand(ctx: Context): Promise<void> {
   if (isPrivateChat) {
     await abortCurrentOperation(ctx, { notifyUser: false });
     await ctx.reply(`${t("start.welcome")}\n\n${t("start.welcome_dm")}`, {
-      reply_markup: createDmKeyboard(),
+      reply_markup: removeKeyboard(),
     });
     return;
   }

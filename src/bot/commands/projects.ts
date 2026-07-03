@@ -55,25 +55,11 @@ function belongsToProjectRepoFamily(project: ProjectInfo, familyKey: string): bo
 }
 
 function getVisibleProjectsForScope(
-  ctx: Context,
+  _ctx: Context,
   projects: ProjectInfo[],
-  scopeKey: string,
+  _scopeKey: string,
 ): ProjectInfo[] {
-  const scope = getScopeFromContext(ctx);
-  if (scope?.context !== SCOPE_CONTEXT.GROUP_GENERAL) {
-    return projects;
-  }
-
-  const currentProject = getCurrentProject(scopeKey);
-  const familyKey = getProjectRepoFamilyKey(currentProject ?? null);
-  if (!familyKey) {
-    return projects;
-  }
-
-  const familyProjects = projects.filter((project) =>
-    belongsToProjectRepoFamily(project, familyKey),
-  );
-  return familyProjects.length > 0 ? familyProjects : projects;
+  return projects;
 }
 
 function formatProjectButtonLabel(label: string, isActive: boolean): string {

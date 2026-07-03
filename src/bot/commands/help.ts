@@ -1,7 +1,7 @@
 import { Context } from "grammy";
 import { t } from "../../i18n/index.js";
 import { getLocalizedBotCommands, getLocalizedDmBotCommands } from "./definitions.js";
-import { createDmKeyboard } from "../utils/keyboard.js";
+import { removeKeyboard } from "../utils/keyboard.js";
 
 function formatHelpText(): string {
   const commands = getLocalizedBotCommands();
@@ -19,7 +19,7 @@ function formatDmHelpText(): string {
 export async function helpCommand(ctx: Context): Promise<void> {
   if (ctx.chat?.type === "private") {
     await ctx.reply(formatDmHelpText(), {
-      reply_markup: createDmKeyboard(),
+      reply_markup: removeKeyboard(),
     });
     return;
   }
