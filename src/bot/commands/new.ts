@@ -142,20 +142,16 @@ export function createNewCommand(deps: NewCommandDeps) {
         return;
       }
 
-      if (!isGeneralForumScope(ctx)) {
-        await ctx.reply(t(BOT_I18N_KEY.NEW_REQUIRES_FORUM_GENERAL));
-        return;
-      }
-
       const currentProject = getCurrentProject(scopeKey);
       if (!currentProject) {
         await ctx.reply(t("new.project_not_selected"));
         return;
       }
 
-      logger.debug("[Bot] Creating new session for forum topic", {
+      logger.debug("[Bot] Creating new session", {
         scopeKey,
         project: currentProject.worktree,
+        forum: isGeneralForumScope(ctx),
       });
 
       const { data: session, error } = await opencodeClient.session.create({
@@ -168,6 +164,24 @@ export function createNewCommand(deps: NewCommandDeps) {
       }
 
       const initialPrompt = parseNewCommandPrompt(ctx);
+
+      // Non-forum groups and DMs: just create a session without a Telegram topic
+      if (!isGeneralForumScope(ctx)) {
+        const sessionInfo: SessionInfo = {
+          id: session.id,
+          title: session.title,
+          directory: currentProject.worktree,
+        };
+        clearAllInteractionState(INTERACTION_CLEAR_REASON.SESSION_CREATED, scopeKey);
+        setCurrentSession(sessionInfo, scopeKey);
+        await ingestSessionInfoForCache(session);
+        await ctx.reply(
+          t("new.created", { title: session.title }),
+          getThreadSendOptions(scope?.threadId ?? null),
+        );
+        return;
+      }
+
       const topicTitle = formatTopicTitle(session.title, session.title);
 
       const createdTopic = await (async () => {
