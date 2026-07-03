@@ -56,7 +56,7 @@ export async function loadSessionHistoryItems(
 
     const { data: messages, error } = await opencodeClient.session.messages(parameters);
 
-    if (error || !messages) {
+    if (error || !Array.isArray(messages)) {
       logger.warn("[SessionHistory] Failed to fetch session messages:", error);
       return [];
     }

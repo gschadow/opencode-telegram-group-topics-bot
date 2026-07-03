@@ -163,7 +163,7 @@ async function loadSessionPage(
     roots: true,
   });
 
-  if (error || !sessions) {
+  if (error || !Array.isArray(sessions)) {
     throw error || new Error("No data received from server");
   }
 

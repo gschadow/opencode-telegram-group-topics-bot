@@ -18,7 +18,7 @@ function worktreeKey(worktree: string): string {
 export async function getProjects(): Promise<ProjectInfo[]> {
   const { data: projects, error } = await opencodeClient.project.list();
 
-  if (error || !projects) {
+  if (error || !Array.isArray(projects)) {
     throw error || new Error("No data received from server");
   }
 

@@ -151,7 +151,7 @@ class PinnedMessageManager {
         sessionID: sessionId,
         directory,
       });
-      if (error || !messagesData) {
+      if (error || !Array.isArray(messagesData)) {
         return;
       }
 
@@ -430,7 +430,7 @@ class PinnedMessageManager {
       }
 
       const { data: providersData, error } = await opencodeClient.config.providers();
-      if (error || !providersData) {
+      if (error || !providersData || !Array.isArray(providersData.providers)) {
         context.contextLimit = 200000;
         context.state.tokensLimit = context.contextLimit;
         this.syncSharedContext(scopeKey);

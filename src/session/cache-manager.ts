@@ -278,7 +278,7 @@ async function runSync(): Promise<void> {
   const params = buildListParams();
   const { data: sessions, error } = await opencodeClient.session.list(params);
 
-  if (error || !sessions) {
+  if (error || !Array.isArray(sessions)) {
     throw error || new Error("No session list received from server");
   }
 
