@@ -36,8 +36,8 @@ export async function cancelCommand(ctx: CommandContext<Context>): Promise<void>
     return;
   }
 
-  // For task/rename/permission interactions, /cancel is not the right tool
-  await ctx
-    .reply(t("interaction.blocked.command_not_allowed"), getThreadSendOptions(threadId))
-    .catch(() => {});
+  // Custom interactions (e.g. awaiting path input) and any other state
+  interactionManager.clear(INTERACTION_CLEAR_REASON.MANUAL, scopeKey);
+  logger.info(`[CancelCommand] Cleared ${state.kind} interaction for scope ${scopeKey}`);
+  await ctx.reply("✖ Cancelled.", getThreadSendOptions(threadId)).catch(() => {});
 }
