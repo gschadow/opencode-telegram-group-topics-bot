@@ -41,38 +41,13 @@ export function formatContextForButton(contextInfo: ContextInfo): string {
  * @returns Reply Keyboard with agent and context in row 1, model and variant in row 2
  */
 export function createMainKeyboard(
-  currentAgent: string,
-  currentModel: ModelInfo,
-  contextInfo?: ContextInfo,
-  variantName?: string,
-  options?: MainKeyboardOptions,
-): Keyboard {
-  const keyboard = new Keyboard();
-  const agentText = getAgentButtonLabel(currentAgent);
-
-  // Format model with compact provider/model text and icon
-  const modelText = formatModelForButton(currentModel.providerID, currentModel.modelID);
-
-  // Context text - show "0" if no data available
-  const contextText =
-    options?.contextLabel ??
-    (contextInfo ? formatContextForButton(contextInfo) : t("keyboard.context_empty"));
-
-  // Variant text - default to "💭 Default" if not provided
-  const variantText = variantName || t("keyboard.variant_default");
-
-  // Row 1: context and agent buttons (for control-plane) or agent/context defaults
-  const contextFirst = options?.contextFirst ?? true;
-  if (contextFirst) {
-    keyboard.text(contextText).text(agentText).row();
-  } else {
-    keyboard.text(agentText).text(contextText).row();
-  }
-
-  // Row 2: model and variant buttons
-  keyboard.text(modelText).text(variantText).row();
-
-  return keyboard.resized().persistent();
+  _currentAgent?: string,
+  _currentModel?: ModelInfo,
+  _contextInfo?: ContextInfo,
+  _variantName?: string,
+  _options?: MainKeyboardOptions,
+): { remove_keyboard: true } {
+  return removeKeyboard();
 }
 
 export function createDmKeyboard(): Keyboard {

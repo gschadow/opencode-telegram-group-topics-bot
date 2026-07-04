@@ -102,36 +102,8 @@ class KeyboardManager {
     );
   }
 
-  public async sendKeyboardUpdate(chatId?: number, scopeKey: string = "global"): Promise<void> {
-    if (!this.api) {
-      logger.warn("[KeyboardManager] API not initialized");
-      return;
-    }
-
-    const targetChatId = chatId ?? this.chatId;
-    if (!targetChatId) {
-      logger.warn("[KeyboardManager] No chatId available");
-      return;
-    }
-
-    const now = Date.now();
-    const lastUpdateTime = this.lastUpdateTimeByScope.get(scopeKey) ?? 0;
-    if (now - lastUpdateTime < this.UPDATE_DEBOUNCE_MS) {
-      return;
-    }
-
-    this.lastUpdateTimeByScope.set(scopeKey, now);
-
-    try {
-      const keyboard = this.buildKeyboard(scopeKey);
-      const threadId = getThreadIdFromScopeKey(scopeKey);
-      await this.api.sendMessage(targetChatId, t("keyboard.updated"), {
-        reply_markup: keyboard,
-        ...(typeof threadId === "number" ? { message_thread_id: threadId } : {}),
-      });
-    } catch (err) {
-      logger.error("[KeyboardManager] Failed to send keyboard update:", err);
-    }
+  public async sendKeyboardUpdate(_chatId?: number, _scopeKey: string = "global"): Promise<void> {
+    // Reply keyboard removed; nothing to push
   }
 
   public getKeyboard(scopeKey: string = "global") {
