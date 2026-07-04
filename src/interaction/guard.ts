@@ -23,6 +23,13 @@ function normalizeIncomingCommand(text: string): string | null {
     return null;
   }
 
+  // Telegram bot commands only contain letters, digits, and underscores after
+  // the leading slash.  Paths like /home/foo/bar are not commands — they start
+  // with / but contain more slashes or other non-command characters.
+  if (!/^\/[a-z0-9_]+$/.test(withoutMention)) {
+    return null;
+  }
+
   return withoutMention;
 }
 

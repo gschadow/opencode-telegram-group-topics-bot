@@ -2,6 +2,7 @@ import { CommandContext, Context } from "grammy";
 import { InlineKeyboard } from "grammy";
 import { existsSync, statSync } from "fs";
 import { basename } from "path";
+import { homedir } from "os";
 import { getCurrentProject } from "../../settings/manager.js";
 import { getProjects } from "../../project/manager.js";
 import { syncSessionDirectoryCache } from "../../session/cache-manager.js";
@@ -429,7 +430,7 @@ export async function handleProjectPathTextInput(ctx: Context): Promise<boolean>
 
   interactionManager.clear("project_path_submitted", scopeKey);
 
-  const dirPath = text.replace(/\/+$/, "") || "/";
+  const dirPath = text.replace(/^~(?=\/|$)/, homedir()).replace(/\/+$/, "") || "/";
   let isDir = false;
   try {
     isDir = existsSync(dirPath) && statSync(dirPath).isDirectory();
