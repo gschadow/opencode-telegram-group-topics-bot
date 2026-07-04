@@ -19,7 +19,7 @@ import {
 import { sessionsCommand, handleSessionSelect } from "./commands/sessions.js";
 import { createNewCommand } from "./commands/new.js";
 import { projectsCommand, handleProjectSelect, handleProjectPathTextInput } from "./commands/projects.js";
-import { mcpsCommand } from "./commands/mcps.js";
+import { mcpsCommand, handleMcpsCallback } from "./commands/mcps.js";
 import { openCommand, handleOpenCallback } from "./commands/open.js";
 import { taskCommand, handleTaskTextAnswer } from "./commands/task.js";
 import { handleTaskListCallback, taskListCommand } from "./commands/tasklist.js";
@@ -1382,6 +1382,7 @@ export function createBot(): Bot<Context> {
       const handledCompactConfirm = await handleCompactConfirm(ctx);
       const handledRenameCancel = await handleRenameCancel(ctx);
       const handledCommands = await handleCommandsCallback(ctx, { ensureEventSubscription });
+      const handledMcps = await handleMcpsCallback(ctx);
       const handledSkills = await handleSkillsCallback(ctx, {
         bot,
         ensureEventSubscription,
@@ -1389,7 +1390,7 @@ export function createBot(): Bot<Context> {
       });
 
       logger.debug(
-        `[Bot] Callback handled: inlineCancel=${handledInlineCancel}, session=${handledSession}, project=${handledProject}, open=${handledOpen}, taskList=${handledTaskList}, question=${handledQuestion}, permission=${handledPermission}, agent=${handledAgent}, model=${handledModel}, variant=${handledVariant}, compactConfirm=${handledCompactConfirm}, rename=${handledRenameCancel}, commands=${handledCommands}, skills=${handledSkills}`,
+        `[Bot] Callback handled: inlineCancel=${handledInlineCancel}, session=${handledSession}, project=${handledProject}, open=${handledOpen}, taskList=${handledTaskList}, question=${handledQuestion}, permission=${handledPermission}, agent=${handledAgent}, model=${handledModel}, variant=${handledVariant}, compactConfirm=${handledCompactConfirm}, rename=${handledRenameCancel}, commands=${handledCommands}, mcps=${handledMcps}, skills=${handledSkills}`,
       );
 
       if (
@@ -1406,6 +1407,7 @@ export function createBot(): Bot<Context> {
         !handledCompactConfirm &&
         !handledRenameCancel &&
         !handledCommands &&
+        !handledMcps &&
         !handledSkills
       ) {
         logger.debug("Unknown callback query:", ctx.callbackQuery?.data);
