@@ -134,5 +134,8 @@ export async function startBotApp(): Promise<void> {
     await clearManagedServiceState().catch((error) => {
       logger.warn("[App] Failed to clear managed service state", error);
     });
+    // Force-exit: after all cleanup, lingering handles (DB connections, intervals,
+    // in-flight HTTP) would otherwise keep the event loop alive indefinitely.
+    process.exit(0);
   }
 }
