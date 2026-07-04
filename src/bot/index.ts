@@ -18,7 +18,8 @@ import {
 } from "./message-patterns.js";
 import { sessionsCommand, handleSessionSelect } from "./commands/sessions.js";
 import { createNewCommand } from "./commands/new.js";
-import { projectsCommand, handleProjectSelect } from "./commands/projects.js";
+import { projectsCommand, handleProjectSelect, handleProjectPathTextInput } from "./commands/projects.js";
+import { mcpsCommand } from "./commands/mcps.js";
 import { openCommand, handleOpenCallback } from "./commands/open.js";
 import { taskCommand, handleTaskTextAnswer } from "./commands/task.js";
 import { handleTaskListCallback, taskListCommand } from "./commands/tasklist.js";
@@ -1353,6 +1354,8 @@ export function createBot(): Bot<Context> {
   bot.command(BOT_COMMAND.RENAME, renameCommand);
   bot.command(BOT_COMMAND.COMMANDS, commandsCommand);
   bot.command(BOT_COMMAND.SKILLS, skillsCommand);
+  bot.command(BOT_COMMAND.MCPS, mcpsCommand);
+  bot.command(BOT_COMMAND.MODELS, (ctx) => showModelSelectionMenu(ctx));
 
   bot.on("message:text", unknownCommandMiddleware);
 
@@ -1686,6 +1689,11 @@ export function createBot(): Bot<Context> {
 
     const handledRename = await handleRenameTextAnswer(ctx);
     if (handledRename) {
+      return;
+    }
+
+    const handledProjectPath = await handleProjectPathTextInput(ctx);
+    if (handledProjectPath) {
       return;
     }
 

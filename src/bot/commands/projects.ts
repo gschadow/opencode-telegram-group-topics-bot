@@ -1,13 +1,17 @@
 import { CommandContext, Context } from "grammy";
 import { InlineKeyboard } from "grammy";
+import { existsSync, statSync } from "fs";
+import { basename } from "path";
 import { getCurrentProject } from "../../settings/manager.js";
 import { getProjects } from "../../project/manager.js";
 import { syncSessionDirectoryCache } from "../../session/cache-manager.js";
 import { clearAllInteractionState } from "../../interaction/cleanup.js";
 import { INTERACTION_CLEAR_REASON } from "../../interaction/constants.js";
+import { interactionManager } from "../../interaction/manager.js";
 import { switchToProject } from "../utils/switch-project.js";
 import {
   appendInlineMenuCancelButton,
+  clearActiveInlineMenu,
   ensureActiveInlineMenu,
   replyWithInlineMenu,
 } from "../handlers/inline-menu.js";
@@ -27,6 +31,7 @@ import { BOT_I18N_KEY } from "../constants.js";
 const MAX_INLINE_BUTTON_LABEL_LENGTH = 64;
 const PROJECT_PAGE_CALLBACK_PREFIX = "projects:page:";
 const PROJECT_SELECT_CALLBACK_PREFIX = "project:";
+const PROJECT_ENTER_PATH_CALLBACK = "projects:enter_path";
 
 interface ProjectsPaginationRange {
   page: number;
@@ -182,6 +187,8 @@ function buildProjectsKeyboard(
     }
   }
 
+  keyboard.row().text(t("projects.enter_path_button"), PROJECT_ENTER_PATH_CALLBACK);
+
   return keyboard;
 }
 
@@ -312,6 +319,37 @@ export async function handleProjectSelect(ctx: Context): Promise<boolean> {
     return true;
   }
 
+  if (callbackQuery.data === PROJECT_ENTER_PATH_CALLBACK) {
+    const lockState = getProjectLockState(ctx, scopeKey);
+    if (lockState.locked) {
+      await ctx.answerCallbackQuery({
+        text: t(BOT_I18N_KEY.PROJECTS_LOCKED_CALLBACK),
+        show_alert: true,
+      });
+      return true;
+    }
+
+    const isActiveMenu = await ensureActiveInlineMenu(ctx, "project");
+    if (!isActiveMenu) {
+      return true;
+    }
+
+    clearActiveInlineMenu("project_enter_path_started", scopeKey);
+    interactionManager.start(
+      {
+        kind: "custom",
+        expectedInput: "text",
+        metadata: { flow: "project_path", stage: "awaiting_path" },
+      },
+      scopeKey,
+    );
+
+    await ctx.answerCallbackQuery();
+    await ctx.deleteMessage();
+    await ctx.reply(t("projects.enter_path_prompt"), getThreadSendOptions(scope?.threadId ?? null));
+    return true;
+  }
+
   if (!callbackQuery.data.startsWith(PROJECT_SELECT_CALLBACK_PREFIX)) {
     return false;
   }
@@ -365,6 +403,58 @@ export async function handleProjectSelect(ctx: Context): Promise<boolean> {
     await ctx.answerCallbackQuery();
     await ctx.reply(t("projects.select_error"), getThreadSendOptions(scope?.threadId ?? null));
   }
+
+  return true;
+}
+
+export async function handleProjectPathTextInput(ctx: Context): Promise<boolean> {
+  const scopeKey = getScopeKeyFromContext(ctx);
+  const snapshot = interactionManager.getSnapshot(scopeKey);
+  if (
+    !snapshot ||
+    snapshot.kind !== "custom" ||
+    snapshot.metadata.flow !== "project_path" ||
+    snapshot.metadata.stage !== "awaiting_path"
+  ) {
+    return false;
+  }
+
+  const text = ctx.message?.text?.trim();
+  if (!text) {
+    return false;
+  }
+
+  const scope = getScopeFromContext(ctx);
+  const threadId = scope?.threadId ?? null;
+
+  interactionManager.clear("project_path_submitted", scopeKey);
+
+  const dirPath = text.replace(/\/+$/, "") || "/";
+  let isDir = false;
+  try {
+    isDir = existsSync(dirPath) && statSync(dirPath).isDirectory();
+  } catch {
+    isDir = false;
+  }
+
+  if (!isDir) {
+    await ctx.reply(t("projects.enter_path_invalid", { path: dirPath }), getThreadSendOptions(threadId));
+    return true;
+  }
+
+  const project: ProjectInfo = {
+    id: dirPath,
+    worktree: dirPath,
+    name: basename(dirPath) || dirPath,
+  };
+
+  logger.info(`[Bot] Switching to manually entered project path: ${dirPath}`);
+  const scopedKeyboard = await switchToProject(ctx, project, INTERACTION_CLEAR_REASON.PROJECT_SWITCHED);
+
+  await ctx.reply(t("projects.enter_path_success", { path: dirPath }), {
+    reply_markup: scopedKeyboard,
+    ...getThreadSendOptions(threadId),
+  });
 
   return true;
 }
