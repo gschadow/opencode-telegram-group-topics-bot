@@ -1678,11 +1678,18 @@ export function createBot(): Bot<Context> {
     botInstance = bot;
     rememberScopeTarget(ctx);
 
-    if (text.startsWith("/")) {
+    const scopeKey = getScopeFromContext(ctx)?.key ?? GLOBAL_SCOPE_KEY;
+
+    // Must check project path input before the /-prefixed-text guard
+    // below, because absolute paths like /home/user/project start with /.
+    const handledProjectPath = await handleProjectPathTextInput(ctx);
+    if (handledProjectPath) {
       return;
     }
 
-    const scopeKey = getScopeFromContext(ctx)?.key ?? GLOBAL_SCOPE_KEY;
+    if (text.startsWith("/")) {
+      return;
+    }
 
     if (questionManager.isActive(scopeKey)) {
       await handleQuestionTextAnswer(ctx);
@@ -1691,11 +1698,6 @@ export function createBot(): Bot<Context> {
 
     const handledRename = await handleRenameTextAnswer(ctx);
     if (handledRename) {
-      return;
-    }
-
-    const handledProjectPath = await handleProjectPathTextInput(ctx);
-    if (handledProjectPath) {
       return;
     }
 
