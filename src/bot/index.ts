@@ -54,7 +54,7 @@ import { questionManager } from "../question/manager.js";
 import { interactionManager } from "../interaction/manager.js";
 import { clearAllInteractionState } from "../interaction/cleanup.js";
 import { keyboardManager } from "../keyboard/manager.js";
-import { subscribeToEvents } from "../opencode/events.js";
+import { subscribeToEvents, stopEventListening } from "../opencode/events.js";
 import { summaryAggregator } from "../summary/aggregator.js";
 import {
   formatSummaryWithRawFallback,
@@ -1750,6 +1750,7 @@ export function cleanupBotRuntime(reason: string): void {
   sessionOutputCoordinator.clearAll();
   void liveStream.clearAll(reason);
   eventCallbackByDirectory.clear();
+  stopEventListening();
   initializedCommandChats.clear();
   renamedGeneralTopicChats.clear();
   botInstance = null;
