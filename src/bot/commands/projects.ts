@@ -254,7 +254,8 @@ export async function projectsCommand(ctx: CommandContext<Context>) {
     }
 
     await syncSessionDirectoryCache();
-    const projects = await getProjects();
+    const currentProject = getCurrentProject(scopeKey);
+    const projects = await getProjects(currentProject?.worktree);
 
     if (projects.length === 0) {
       await ctx.reply(t("projects.empty"));
@@ -300,7 +301,8 @@ export async function handleProjectSelect(ctx: Context): Promise<boolean> {
     }
 
     try {
-      const projects = getVisibleProjectsForScope(ctx, await getProjects(), scopeKey);
+      const _currentProject = getCurrentProject(scopeKey);
+      const projects = getVisibleProjectsForScope(ctx, await getProjects(_currentProject?.worktree), scopeKey);
       if (projects.length === 0) {
         await ctx.answerCallbackQuery();
         await ctx.reply(t("projects.empty"), getThreadSendOptions(scope?.threadId ?? null));
@@ -372,7 +374,8 @@ export async function handleProjectSelect(ctx: Context): Promise<boolean> {
   }
 
   try {
-    const projects = getVisibleProjectsForScope(ctx, await getProjects(), scopeKey);
+    const _cp = getCurrentProject(scopeKey);
+    const projects = getVisibleProjectsForScope(ctx, await getProjects(_cp?.worktree), scopeKey);
     const selectedProject = projects.find((p) => p.id === projectId);
 
     if (!selectedProject) {

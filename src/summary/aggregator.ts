@@ -42,7 +42,7 @@ type QuestionCallback = (sessionId: string, questions: Question[], requestID: st
 
 type QuestionErrorCallback = () => void;
 
-type ThinkingCallback = (sessionId: string) => void;
+type ThinkingCallback = (sessionId: string, thinkingText: string) => void;
 
 type TypingIndicatorCallback = (sessionId: string) => void;
 
@@ -264,6 +264,11 @@ class SummaryAggregator {
   private thinkingFiredForMessages: Set<string> = new Set();
   private typingTimer: ReturnType<typeof setInterval> | null = null;
   private activeTypingSessions: Set<string> = new Set();
+  private reasoningTexts: Map<string, string> = new Map();
+  private reasoningHashes: Map<string, Set<string>> = new Map();
+  private reasoningPartIds: Map<string, string> = new Map();
+  private partTypesByPartId: Map<string, string> = new Map();
+  private messageBootstrappedFromDeltas: Set<string> = new Set();
   private partHashes: Map<string, Set<string>> = new Map();
   private completionTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
   private stepFinishCosts: Map<string, number> = new Map();
@@ -530,9 +535,15 @@ class SummaryAggregator {
         case "permission.replied":
           logger.info(`[Aggregator] Permission replied: requestID=${event.properties.requestID}`);
           break;
-        default:
-          logger.debug(`[Aggregator] Unhandled event type: ${event.type}`);
+        default: {
+          const eventType = (event as { type: string }).type;
+          if (eventType === "message.part.delta") {
+            this.handleMessagePartDelta(event);
+          } else {
+            logger.debug(`[Aggregator] Unhandled event type: ${eventType}`);
+          }
           break;
+        }
       }
     } catch (error) {
       logger.error(
@@ -568,6 +579,10 @@ class SummaryAggregator {
       this.stepFinishCosts.delete(messageKey);
       this.lastStreamedMessageText.delete(messageKey);
       this.thinkingFiredForMessages.delete(messageKey);
+      this.reasoningTexts.delete(messageKey);
+      this.reasoningHashes.delete(messageKey);
+      this.reasoningPartIds.delete(messageKey);
+      this.messageBootstrappedFromDeltas.delete(messageKey);
       this.clearCompletionTimer(messageKey);
     }
 
@@ -591,6 +606,11 @@ class SummaryAggregator {
     this.pendingParts.clear();
     this.messages.clear();
     this.partHashes.clear();
+    this.reasoningTexts.clear();
+    this.reasoningHashes.clear();
+    this.reasoningPartIds.clear();
+    this.partTypesByPartId.clear();
+    this.messageBootstrappedFromDeltas.clear();
     this.stepFinishCosts.clear();
     this.lastStreamedMessageText.clear();
     for (const timer of this.completionTimers.values()) {
@@ -1004,6 +1024,14 @@ class SummaryAggregator {
         this.startTypingIndicator(info.sessionID);
       }
 
+      logger.debug("[Aggregator] message.updated event properties", {
+        topKeys: Object.keys(event.properties as object).filter((k) => !k.startsWith("_")),
+        infoKeys: Object.keys(info as object).filter((k) => !k.startsWith("_")),
+        hasInfoContent: "content" in info,
+        hasInfoText: "text" in info,
+        finish: JSON.stringify((info as Record<string, unknown>).finish),
+      });
+
       const pending = this.pendingParts.get(messageKey) || [];
       const current = this.currentMessageParts.get(messageKey) || [];
       this.currentMessageParts.set(messageKey, [...current, ...pending]);
@@ -1059,6 +1087,7 @@ class SummaryAggregator {
     },
   ): void {
     const { part } = event.properties;
+    this.partTypesByPartId.set(part.id, part.type);
 
     const isCurrentRootSession = this.isTrackedSession(part.sessionID);
     const isTrackedChildSession = this.isTrackedChildSession(part.sessionID);
@@ -1101,13 +1130,20 @@ class SummaryAggregator {
     const messageInfo = this.messages.get(messageKey);
 
     if (part.type === "reasoning") {
-      // Fire the thinking callback once per message on the first reasoning part.
-      // This is the signal that the model is actually doing extended thinking.
-      if (!this.thinkingFiredForMessages.has(messageKey) && this.onThinkingCallback) {
-        this.thinkingFiredForMessages.add(messageKey);
-        const callback = this.onThinkingCallback;
-        const sessionID = part.sessionID;
-        callback(sessionID);
+      const reasoningChunk = ((part as { text: string }).text || "").trim();
+      if (reasoningChunk) {
+        const prevPartId = this.reasoningPartIds.get(messageKey);
+        if (part.id !== prevPartId) {
+          this.reasoningTexts.set(messageKey, "");
+          this.reasoningHashes.delete(messageKey);
+          this.reasoningPartIds.set(messageKey, part.id);
+        }
+      this.reasoningTexts.set(messageKey, reasoningChunk);
+      }
+
+      if (this.onThinkingCallback) {
+        const accumulatedText = this.reasoningTexts.get(messageKey) || reasoningChunk;
+        this.onThinkingCallback(part.sessionID, accumulatedText);
       }
     } else if (part.type === "text" && "text" in part && part.text) {
       const partHash = this.hashString(part.text);
@@ -1258,6 +1294,67 @@ class SummaryAggregator {
     }
 
     this.lastUpdated = Date.now();
+  }
+
+  private handleMessagePartDelta(event: Event): void {
+    const props = event.properties as Record<string, unknown>;
+    const sessionID = props.sessionID as string | undefined;
+    const messageID = props.messageID as string | undefined;
+    const partID = props.partID as string | undefined;
+    const field = props.field as string | undefined;
+    const delta = props.delta as string | undefined;
+
+    if (!sessionID || !messageID || field !== "text" || !delta) {
+      logger.debug("[Aggregator] Delta filtered out", {
+        hasSessionID: !!sessionID,
+        hasMessageID: !!messageID,
+        field,
+        hasDelta: !!delta,
+        deltaLen: delta?.length,
+        allKeys: Object.keys(props).join(","),
+      });
+      return;
+    }
+
+    const isCurrentRootSession = this.isTrackedSession(sessionID);
+    const isTrackedChild = this.isTrackedChildSession(sessionID);
+    if (!isCurrentRootSession && !isTrackedChild) {
+      return;
+    }
+    if (isTrackedChild) {
+      return;
+    }
+
+    const messageKey = this.getMessageKey(sessionID, messageID);
+    const partType = partID ? this.partTypesByPartId.get(partID) : undefined;
+
+    if (partType === "reasoning") {
+      if (this.onThinkingCallback) {
+        this.onThinkingCallback(sessionID, this.reasoningTexts.get(messageKey) || "");
+      }
+      return;
+    }
+
+    {
+      if (!this.messages.has(messageKey)) {
+        this.messages.set(messageKey, { role: "assistant", sessionId: sessionID });
+      }
+      this.messageBootstrappedFromDeltas.add(messageKey);
+      if (!this.currentMessageParts.has(messageKey)) {
+        this.currentMessageParts.set(messageKey, []);
+        this.startTypingIndicator(sessionID);
+      }
+      const parts = this.currentMessageParts.get(messageKey)!;
+      parts.length = 0;
+      parts.push(delta);
+      logger.debug("[Aggregator] Text delta accumulated", {
+        sessionID,
+        messageID,
+        partID,
+        deltaLen: delta.length,
+      });
+      this.emitMessageUpdated(messageKey, sessionID);
+    }
   }
 
   private prepareToolFileContext(
@@ -1602,7 +1699,7 @@ class SummaryAggregator {
     }
 
     const parts = this.currentMessageParts.get(messageKey) || [];
-    const messageText = parts.join("");
+    const messageText = this.sanitizeMessageText(parts.join(""));
     if (!messageText) {
       return;
     }
@@ -1642,9 +1739,15 @@ class SummaryAggregator {
     }
   }
 
+  private sanitizeMessageText(text: string): string {
+    return text
+      .replace(/^\s*(?:\.{3,}|<think>[\s\S]*?<\/think>|[).?!:,]+\s*)+/, "")
+      .trimStart();
+  }
+
   private finalizeMessageCompletion(messageKey: string, sessionId: string): void {
     const parts = this.currentMessageParts.get(messageKey) || [];
-    const messageText = parts.join("");
+    const messageText = this.sanitizeMessageText(parts.join(""));
 
     logger.debug(
       `[Aggregator] Message completed: messageKey=${messageKey}, textLength=${messageText.length}, totalParts=${parts.length}, session=${sessionId}`,

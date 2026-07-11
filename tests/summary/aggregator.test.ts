@@ -465,7 +465,7 @@ describe("summary/aggregator", () => {
 
     await new Promise<void>((resolve) => setImmediate(resolve));
 
-    expect(onThinking).toHaveBeenCalledWith("session-1");
+    expect(onThinking).toHaveBeenCalledWith("session-1", "Let me think about this...");
   });
 
   it("does not send thinking callback when no reasoning part arrives", async () => {
@@ -505,7 +505,7 @@ describe("summary/aggregator", () => {
     expect(onThinking).not.toHaveBeenCalled();
   });
 
-  it("fires thinking callback only once per message even with multiple reasoning parts", async () => {
+  it("fires thinking callback on each reasoning part with accumulated text", async () => {
     const onThinking = vi.fn();
     summaryAggregator.setOnThinking(onThinking);
     summaryAggregator.setSession("session-1");
@@ -540,8 +540,10 @@ describe("summary/aggregator", () => {
 
     await new Promise<void>((resolve) => setImmediate(resolve));
 
-    expect(onThinking).toHaveBeenCalledTimes(1);
-    expect(onThinking).toHaveBeenCalledWith("session-1");
+    expect(onThinking).toHaveBeenCalledTimes(3);
+    expect(onThinking).toHaveBeenNthCalledWith(1, "session-1", "Thinking step 0");
+    expect(onThinking).toHaveBeenNthCalledWith(2, "session-1", "Thinking step 0Thinking step 1");
+    expect(onThinking).toHaveBeenNthCalledWith(3, "session-1", "Thinking step 0Thinking step 1Thinking step 2");
   });
 
   it("reports session.error message through callback", async () => {

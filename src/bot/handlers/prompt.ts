@@ -1,7 +1,7 @@
 import { access } from "node:fs/promises";
 import { Bot, Context } from "grammy";
 import type { FilePartInput, TextPartInput } from "@opencode-ai/sdk/v2";
-import { opencodeClient } from "../../opencode/client.js";
+import { opencodeClient, sessionCreateInDirectory } from "../../opencode/client.js";
 import { classifyPromptSubmitError } from "../../opencode/prompt-submit-error.js";
 import { clearSession, getCurrentSession, setCurrentSession } from "../../session/manager.js";
 import { ingestSessionInfoForCache } from "../../session/cache-manager.js";
@@ -502,9 +502,7 @@ export async function processUserPrompt(
 
     await ctx.reply(t("bot.creating_session"));
 
-    const { data: session, error } = await opencodeClient.session.create({
-      directory: currentProject.worktree,
-    });
+    const { data: session, error } = await sessionCreateInDirectory(currentProject.worktree);
 
     if (error || !session) {
       await ctx.reply(t("bot.create_session_error"));

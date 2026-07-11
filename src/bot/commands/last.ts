@@ -11,6 +11,9 @@ import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
 import { getScopeFromContext, getScopeKeyFromContext, getThreadSendOptions } from "../scope.js";
 import { showCurrentQuestion } from "../handlers/question.js";
+import { getAssistantParseMode } from "../../summary/formatter.js";
+import { sendMessageWithMarkdownFallback } from "../utils/send-with-markdown-fallback.js";
+import { convertToTelegramMarkdownV2 } from "../utils/markdown-to-telegram-v2.js";
 
 const LAST_MESSAGE_MAX_LENGTH = 3500;
 
@@ -54,7 +57,21 @@ export async function lastCommand(ctx: CommandContext<Context>): Promise<void> {
       return;
     }
 
-    await ctx.reply(formatLastMessage(lastVisibleTurn.role, lastVisibleTurn.text), sendOptions);
+    const text = formatLastMessage(lastVisibleTurn.role, lastVisibleTurn.text);
+    const parseMode = getAssistantParseMode();
+    if (parseMode === "MarkdownV2") {
+      const formattedText = convertToTelegramMarkdownV2(text);
+      await sendMessageWithMarkdownFallback({
+        api: ctx.api,
+        chatId: ctx.chat!.id,
+        text: formattedText,
+        rawFallbackText: text,
+        options: sendOptions,
+        parseMode: "MarkdownV2",
+      });
+    } else {
+      await ctx.reply(text, sendOptions);
+    }
   } catch (error) {
     logger.error("[Last] Error loading latest session message:", error);
     const scope = getScopeFromContext(ctx);

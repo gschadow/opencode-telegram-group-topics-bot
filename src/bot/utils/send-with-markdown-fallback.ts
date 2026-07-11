@@ -58,7 +58,7 @@ const MARKDOWN_V2_ESCAPED_CHAR = /\\([_\*\[\]\(\)~`>#+\-=|{}.!\\])/g;
 
 const MESSAGE_NOT_MODIFIED_MARKER = "message is not modified";
 
-function escapeTelegramMarkdownV2(text: string): string {
+export function escapeTelegramMarkdownV2(text: string): string {
   let result = "";
   let trailingBackslashes = 0;
 

@@ -109,6 +109,8 @@ import { sendTtsResponseForSession } from "./utils/send-tts-response.js";
 import { consumePendingCompactionNotice } from "./utils/pending-compaction-notices.js";
 import { LiveStream } from "./streaming/live-stream.js";
 import { contextStateManager } from "../context/manager.js";
+import { getSessionById } from "../session/manager.js";
+import { loadLastAssistantMessage } from "../session/history.js";
 import { formatContextForButton } from "./utils/keyboard.js";
 import { SessionOutputCoordinator } from "./session-output-coordinator.js";
 import { assistantRunState } from "./assistant-run-state.js";
@@ -250,8 +252,24 @@ async function finalizeSessionDelivery(
 
   try {
     await liveStream.flushSession(sessionId);
-    if (pendingCompletionText) {
-      deliveryComplete = await deliverAssistantCompletion(sessionId, pendingCompletionText)
+    let textToDeliver = pendingCompletionText;
+    if (!textToDeliver) {
+      const session = getSessionById(sessionId);
+      if (session?.directory) {
+        const lastMessage = await loadLastAssistantMessage(sessionId, session.directory).catch(
+          () => null,
+        );
+        if (lastMessage) {
+          textToDeliver = lastMessage.text;
+          logger.debug("[Bot] Delivering assistant text from API fallback", {
+            sessionId,
+            textLen: textToDeliver.length,
+          });
+        }
+      }
+    }
+    if (textToDeliver) {
+      deliveryComplete = await deliverAssistantCompletion(sessionId, textToDeliver)
         .then(() => true)
         .catch((error) => {
           logger.error("[Bot] Failed to deliver pending assistant completion", {
@@ -434,7 +452,7 @@ const sessionOutputCoordinator = new SessionOutputCoordinator({
         target.threadId,
       );
     },
-    onThinking: async ({ sessionId }) => {
+    onThinking: async ({ sessionId, thinkingText }) => {
       if (config.bot.hideThinkingMessages || !botInstance) {
         return;
       }
@@ -445,7 +463,7 @@ const sessionOutputCoordinator = new SessionOutputCoordinator({
       }
 
       logger.debug("[Bot] Agent started thinking");
-      liveStream.showThinking(sessionId, t("bot.thinking"));
+      await liveStream.showThinking(sessionId, thinkingText || t("bot.thinking"));
     },
     onSessionError: async ({ sessionId, message }) => {
       if (!botInstance) {
@@ -859,18 +877,18 @@ const liveStream = new LiveStream({
 });
 
 async function ensureCommandsInitialized(ctx: Context, next: NextFunction): Promise<void> {
-  if (!ctx.from || ctx.from.id !== config.telegram.allowedUserId) {
-    await next();
-    return;
-  }
-
-  if (!ctx.chat) {
-    logger.warn("[Bot] Cannot initialize commands: chat context is missing");
+  if (!ctx.from || !ctx.chat) {
     await next();
     return;
   }
 
   if (initializedCommandChats.has(ctx.chat.id)) {
+    await next();
+    return;
+  }
+
+  // In private chats, only initialize commands for the owner
+  if (ctx.chat.type === CHAT_TYPE.PRIVATE && ctx.from.id !== config.telegram.allowedUserId) {
     await next();
     return;
   }
@@ -895,7 +913,7 @@ async function ensureCommandsInitialized(ctx: Context, next: NextFunction): Prom
 
     initializedCommandChats.add(ctx.chat.id);
     logger.info(
-      `[Bot] Commands initialized for authorized user in chat (chat_id=${ctx.chat.id}, user_id=${ctx.from.id})`,
+      `[Bot] Commands initialized for user in chat (chat_id=${ctx.chat.id}, user_id=${ctx.from.id})`,
     );
   } catch (err) {
     logger.error("[Bot] Failed to set commands:", err);
@@ -1023,11 +1041,12 @@ async function ensureEventSubscription(directory: string): Promise<void> {
       });
   });
 
-  summaryAggregator.setOnThinking(async (sessionId) => {
+  summaryAggregator.setOnThinking(async (sessionId, thinkingText) => {
     sessionOutputCoordinator.dispatch({
       kind: "thinking",
       sessionId,
       visibleToUser: !config.bot.hideThinkingMessages,
+      thinkingText,
     });
   });
 

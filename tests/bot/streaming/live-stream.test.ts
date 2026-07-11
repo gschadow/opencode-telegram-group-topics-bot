@@ -20,7 +20,7 @@ describe("bot/streaming/live-stream", () => {
     expect(sendText).toHaveBeenCalledWith(
       "s1",
       "Assistant start\n\n⏳ bash npm test",
-      "raw",
+      "markdown_v2",
       false,
     );
     expect(editText).not.toHaveBeenCalled();
@@ -33,12 +33,12 @@ describe("bot/streaming/live-stream", () => {
     const editText = vi.fn().mockResolvedValue(undefined);
     const stream = new LiveStream({ sendText, editText, throttleMs: 50 });
 
-    stream.showThinking("s1", "Thinking");
+    await stream.showThinking("s1", "Thinking");
     await vi.advanceTimersByTimeAsync(50);
     await stream.updateAssistant("s1", "m1", "Assistant start");
     await vi.advanceTimersByTimeAsync(50);
 
-    expect(editText).toHaveBeenCalledWith("s1", 102, "Thinking\n\nAssistant start", "raw", false);
+    expect(editText).toHaveBeenCalledWith("s1", 102, "> Thinking\n\nAssistant start", "markdown_v2", false);
   });
 
   it("starts a new streamed message after a file boundary seal", async () => {
@@ -53,8 +53,8 @@ describe("bot/streaming/live-stream", () => {
     await stream.updateAssistant("s1", "m1", "Before file\n\nAfter file");
     await vi.advanceTimersByTimeAsync(50);
 
-    expect(sendText).toHaveBeenNthCalledWith(1, "s1", "Before file", "raw", false);
-    expect(sendText).toHaveBeenNthCalledWith(2, "s1", "After file", "raw", false);
+    expect(sendText).toHaveBeenNthCalledWith(1, "s1", "Before file", "markdown_v2", false);
+    expect(sendText).toHaveBeenNthCalledWith(2, "s1", "After file", "markdown_v2", false);
   });
 
   it("does not replay the just-sealed assistant prefix after a file boundary", async () => {
@@ -78,15 +78,15 @@ describe("bot/streaming/live-stream", () => {
     expect(sendText).toHaveBeenNthCalledWith(
       1,
       "s1",
-      "Cycle 1: first update to the file.",
-      "raw",
+      "Cycle 1: first update to the file\\.",
+      "markdown_v2",
       false,
     );
     expect(sendText).toHaveBeenNthCalledWith(
       2,
       "s1",
-      "Cycle 2: second update to the file.",
-      "raw",
+      "Cycle 2: second update to the file\\.",
+      "markdown_v2",
       false,
     );
   });
@@ -105,8 +105,8 @@ describe("bot/streaming/live-stream", () => {
     await stream.updateAssistant("s1", "m1", "After question");
     await vi.advanceTimersByTimeAsync(50);
 
-    expect(sendText).toHaveBeenNthCalledWith(1, "s1", "Before question", "raw", false);
-    expect(sendText).toHaveBeenNthCalledWith(2, "s1", "After question", "raw", false);
+    expect(sendText).toHaveBeenNthCalledWith(1, "s1", "Before question", "markdown_v2", false);
+    expect(sendText).toHaveBeenNthCalledWith(2, "s1", "After question", "markdown_v2", false);
   });
 
   it("starts a new service stream after an assistant-only boundary break", async () => {
@@ -123,8 +123,8 @@ describe("bot/streaming/live-stream", () => {
     stream.replaceServiceByPrefix("s1", "__tool__:call-1", "⏳ bash npm test");
     await vi.advanceTimersByTimeAsync(50);
 
-    expect(sendText).toHaveBeenNthCalledWith(1, "s1", "Interim answer", "raw", false);
-    expect(sendText).toHaveBeenNthCalledWith(2, "s1", "⏳ bash npm test", "raw", false);
+    expect(sendText).toHaveBeenNthCalledWith(1, "s1", "Interim answer", "markdown_v2", false);
+    expect(sendText).toHaveBeenNthCalledWith(2, "s1", "⏳ bash npm test", "markdown_v2", false);
     expect(editText).not.toHaveBeenCalled();
   });
 
@@ -141,8 +141,8 @@ describe("bot/streaming/live-stream", () => {
     await stream.updateAssistant("s1", "m2", "Small reply");
     await vi.advanceTimersByTimeAsync(50);
 
-    expect(sendText).toHaveBeenNthCalledWith(1, "s1", "⏳ bash npm test", "raw", false);
-    expect(sendText).toHaveBeenNthCalledWith(2, "s1", "Small reply", "raw", false);
+    expect(sendText).toHaveBeenNthCalledWith(1, "s1", "⏳ bash npm test", "markdown_v2", false);
+    expect(sendText).toHaveBeenNthCalledWith(2, "s1", "Small reply", "markdown_v2", false);
     expect(editText).not.toHaveBeenCalled();
   });
 
@@ -163,7 +163,7 @@ describe("bot/streaming/live-stream", () => {
       "s1",
       20,
       "First message extended\n\n✅ tool finished",
-      "raw",
+      "markdown_v2",
       false,
     );
   });
@@ -196,7 +196,7 @@ describe("bot/streaming/live-stream", () => {
     await vi.advanceTimersByTimeAsync(50);
 
     expect(sendText).toHaveBeenCalledTimes(1);
-    expect(sendText.mock.calls[0][1].length).toBeLessThanOrEqual(3500);
+    expect(sendText.mock.calls[0][1].length).toBeLessThanOrEqual(3503);
   });
 
   it("replaces prior replace-keyed service updates instead of accumulating them", async () => {
@@ -222,7 +222,7 @@ describe("bot/streaming/live-stream", () => {
       }
     ).states.get("s1");
 
-    expect(editText).toHaveBeenLastCalledWith("s1", 52, "✅ todo step 2", "raw", false);
+    expect(editText).toHaveBeenLastCalledWith("s1", 52, "✅ todo step 2", "markdown_v2", false);
     expect(internalState?.service.updates).toEqual(["✅ todo step 2"]);
   });
 
@@ -249,8 +249,8 @@ describe("bot/streaming/live-stream", () => {
       }
     ).states.get("s1");
 
-    expect(sendText).toHaveBeenCalledWith("s1", "⏳ bash npm test", "raw", false);
-    expect(editText).toHaveBeenLastCalledWith("s1", 53, "✅ bash npm test", "raw", false);
+    expect(sendText).toHaveBeenCalledWith("s1", "⏳ bash npm test", "markdown_v2", false);
+    expect(editText).toHaveBeenLastCalledWith("s1", 53, "✅ bash npm test", "markdown_v2", false);
     expect(internalState?.service.updates).toEqual(["✅ bash npm test"]);
   });
 
@@ -271,7 +271,7 @@ describe("bot/streaming/live-stream", () => {
     const renderedParts = sendText.mock.calls.map((call) => call[1]);
     expect(renderedParts[0]).toBe("A".repeat(4094));
     expect(renderedParts[1]).toBe("B");
-    expect(editText).toHaveBeenLastCalledWith("s1", 62, "BCCCC", "raw", false);
+    expect(editText).toHaveBeenLastCalledWith("s1", 62, "BCCCC", "markdown_v2", false);
   });
 
   it("removes duplicate assistant text after final delivery while keeping service history", async () => {
@@ -282,13 +282,13 @@ describe("bot/streaming/live-stream", () => {
     const deleteText = vi.fn().mockResolvedValue(undefined);
     const stream = new LiveStream({ sendText, editText, deleteText, throttleMs: 50 });
 
-    stream.showThinking("s1", "Thinking");
+    await stream.showThinking("s1", "Thinking");
     await stream.updateAssistant("s1", "m1", "Final answer");
     await vi.advanceTimersByTimeAsync(50);
 
     await stream.cleanupAfterFinalDelivery("s1");
 
-    expect(editText).toHaveBeenLastCalledWith("s1", 71, "Thinking", "raw", false);
+    expect(editText).toHaveBeenLastCalledWith("s1", 71, "> Thinking", "markdown_v2", false);
     expect(deleteText).not.toHaveBeenCalled();
   });
 

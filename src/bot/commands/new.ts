@@ -1,5 +1,5 @@
 import { CommandContext, Context } from "grammy";
-import { opencodeClient } from "../../opencode/client.js";
+import { opencodeClient, sessionCreateInDirectory } from "../../opencode/client.js";
 import { classifyPromptSubmitError } from "../../opencode/prompt-submit-error.js";
 import { setCurrentSession, SessionInfo } from "../../session/manager.js";
 import { ingestSessionInfoForCache } from "../../session/cache-manager.js";
@@ -154,9 +154,7 @@ export function createNewCommand(deps: NewCommandDeps) {
         forum: isGeneralForumScope(ctx),
       });
 
-      const { data: session, error } = await opencodeClient.session.create({
-        directory: currentProject.worktree,
-      });
+      const { data: session, error } = await sessionCreateInDirectory(currentProject.worktree);
 
       if (error || !session) {
         await ctx.reply(t("new.create_error"));

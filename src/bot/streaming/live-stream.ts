@@ -3,6 +3,18 @@ import { logger } from "../../utils/logger.js";
 import type { TelegramTextFormat } from "../utils/telegram-text.js";
 import type { TelegramRenderedPart } from "../../telegram/render/types.js";
 import { getTelegramRetryAfterMs } from "../utils/send-with-markdown-fallback.js";
+import { convertToTelegramMarkdownV2 } from "../utils/markdown-to-telegram-v2.js";
+
+function renderAndConvertEntries(entries: StreamEntry[]): string {
+  const raw = renderEntries(entries);
+  if (!raw) return raw;
+  try {
+    return convertToTelegramMarkdownV2(raw);
+  } catch (error) {
+    logger.warn("[LiveStream] Markdown converter failed, falling back to raw", error);
+    return raw;
+  }
+}
 
 const DEFAULT_THROTTLE_MS = 1000;
 const TELEGRAM_MESSAGE_LIMIT = 4096;
@@ -262,9 +274,19 @@ export class LiveStream {
     });
   }
 
-  showThinking(sessionId: string, text: string): void {
+  async showThinking(sessionId: string, text: string): Promise<void> {
     if (!sessionId || !text.trim()) {
       return;
+    }
+
+    const state = this.states.get(sessionId);
+    if (state) {
+      const hasToolEntry = state.entries.some(
+        (e) => e.kind === "service" && e.replaceKey !== THINKING_PREFIX,
+      );
+      if (hasToolEntry) {
+        await this.sealCurrentMessage(sessionId, false, false);
+      }
     }
 
     this.applyMutation(sessionId, (state) => {
@@ -398,8 +420,14 @@ export class LiveStream {
     }
 
     const hasAssistantEntry = state.entries.some((entry) => entry.kind === "assistant");
-    const hasServiceEntry = state.entries.some((entry) => entry.kind === "service");
-    if (!hasAssistantEntry || hasServiceEntry) {
+    const hasNonThinkingServiceEntry = state.entries.some(
+      (entry) => entry.kind === "service" && entry.replaceKey !== THINKING_PREFIX,
+    );
+    const hasOnlyThinking =
+      !hasNonThinkingServiceEntry &&
+      state.entries.some((entry) => entry.kind === "service" && entry.replaceKey === THINKING_PREFIX);
+
+    if (!hasAssistantEntry && !hasOnlyThinking) {
       return;
     }
 
@@ -551,7 +579,7 @@ export class LiveStream {
       }
 
       if (latestState.lastSentText !== remainingText) {
-        await this.editText(sessionId, latestState.messageId, remainingText, "raw", false);
+        await this.editText(sessionId, latestState.messageId, remainingText, "markdown_v2", false);
         latestState.lastSentText = remainingText;
       }
 
@@ -790,16 +818,22 @@ export class LiveStream {
     }
 
     while (true) {
-      const text = renderEntries(state.entries);
+      const text = renderAndConvertEntries(state.entries);
       if (!text) {
+        logger.debug("[LiveStream] No text to flush", { sessionId, entryCount: state.entries.length });
         return;
       }
 
       if (text.length <= TELEGRAM_MESSAGE_LIMIT) {
         if (state.messageId === null) {
           try {
-            const messageId = await this.sendText(sessionId, text, "raw", false);
+            logger.debug("[LiveStream] Sending new stream message", {
+              sessionId,
+              textLen: text.length,
+            });
+            const messageId = await this.sendText(sessionId, text, "markdown_v2", false);
             if (messageId === null) {
+              logger.debug("[LiveStream] sendText returned null (routing?)", { sessionId });
               return;
             }
 
@@ -829,7 +863,12 @@ export class LiveStream {
         }
 
         try {
-          await this.editText(sessionId, state.messageId, text, "raw", false);
+          logger.debug("[LiveStream] Editing stream message", {
+            sessionId,
+            messageId: state.messageId,
+            textLen: text.length,
+          });
+          await this.editText(sessionId, state.messageId, text, "markdown_v2", false);
           state.lastSentText = text;
         } catch (error) {
           const retryAfterMs = getTelegramRetryAfterMs(error);
@@ -850,21 +889,21 @@ export class LiveStream {
       }
 
       const { sentEntries, remainingEntries } = splitEntriesForLimit(state.entries);
-      const prefixText = renderEntries(sentEntries);
+      const prefixText = renderAndConvertEntries(sentEntries);
       if (!prefixText) {
         return;
       }
 
       try {
         if (state.messageId === null) {
-          const messageId = await this.sendText(sessionId, prefixText, "raw", false);
+          const messageId = await this.sendText(sessionId, prefixText, "markdown_v2", false);
           if (messageId === null) {
             return;
           }
 
           state.messageId = messageId;
         } else if (state.lastSentText !== prefixText) {
-          await this.editText(sessionId, state.messageId, prefixText, "raw", false);
+          await this.editText(sessionId, state.messageId, prefixText, "markdown_v2", false);
         }
       } catch (error) {
         const retryAfterMs = getTelegramRetryAfterMs(error);

@@ -53,6 +53,7 @@ export type SessionOutputAction =
       kind: "thinking";
       sessionId: string;
       visibleToUser: boolean;
+      thinkingText: string;
     }
   | {
       kind: "session_idle";

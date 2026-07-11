@@ -1,4 +1,4 @@
-import { opencodeClient } from "../opencode/client.js";
+import { opencodeClient, sessionCreateInDirectory } from "../opencode/client.js";
 import { logger } from "../utils/logger.js";
 import type { ParsedTaskSchedule } from "./types.js";
 
@@ -168,8 +168,7 @@ export async function parseTaskSchedule(
   let sessionId: string | null = null;
 
   try {
-    const { data: session, error: createError } = await opencodeClient.session.create({
-      directory: trimmedDirectory,
+    const { data: session, error: createError } = await sessionCreateInDirectory(trimmedDirectory, {
       title: SCHEDULE_PARSE_SESSION_TITLE,
     });
 

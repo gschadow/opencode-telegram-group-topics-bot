@@ -1,3 +1,4 @@
+import { basename } from "path";
 import { opencodeClient } from "../opencode/client.js";
 import { ProjectInfo } from "../settings/manager.js";
 import { getCachedSessionProjects } from "../session/cache-manager.js";
@@ -15,7 +16,7 @@ function worktreeKey(worktree: string): string {
   return worktree;
 }
 
-export async function getProjects(): Promise<ProjectInfo[]> {
+export async function getProjects(currentWorktree?: string): Promise<ProjectInfo[]> {
   const { data: projects, error } = await opencodeClient.project.list();
 
   if (error || !Array.isArray(projects)) {
@@ -72,6 +73,17 @@ export async function getProjects(): Promise<ProjectInfo[]> {
       worktree: cachedProject.worktree,
       name: cachedProject.name,
       lastUpdated: cachedProject.lastUpdated ?? 0,
+    });
+  }
+
+  // Always include the user's currently-selected directory even if opencode has
+  // no sessions for it yet.  Uses the same fake-id scheme as the session cache.
+  if (currentWorktree && !mergedByWorktree.has(worktreeKey(currentWorktree))) {
+    mergedByWorktree.set(worktreeKey(currentWorktree), {
+      id: currentWorktree,
+      worktree: currentWorktree,
+      name: basename(currentWorktree) || currentWorktree,
+      lastUpdated: Date.now(),
     });
   }
 

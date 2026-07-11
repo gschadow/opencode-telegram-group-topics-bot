@@ -1,5 +1,5 @@
 import { config } from "../config.js";
-import { opencodeClient } from "../opencode/client.js";
+import { opencodeClient, sessionCreateInDirectory } from "../opencode/client.js";
 import { logger } from "../utils/logger.js";
 import type { ScheduledTask, ScheduledTaskExecutionResult } from "./types.js";
 
@@ -251,8 +251,7 @@ export async function executeScheduledTask(
   let sessionId: string | null = null;
 
   try {
-    const { data: session, error: createError } = await opencodeClient.session.create({
-      directory: task.projectWorktree,
+    const { data: session, error: createError } = await sessionCreateInDirectory(task.projectWorktree, {
       title: SCHEDULED_TASK_SESSION_TITLE,
       permission: SCHEDULED_TASK_PERMISSION_RULESET,
     });
