@@ -7,7 +7,11 @@ Languages: English (`en`), Deutsch (`de`), Espanol (`es`), Francais (`fr`), Russ
 
 A Telegram bot for [OpenCode](https://opencode.ai) that turns one Telegram supergroup into a multi-session mobile workspace.
 
-This project is a fork of the original single-chat bot: [grinev/opencode-telegram-bot](https://github.com/grinev/opencode-telegram-bot) by Ruslan Grinev.
+> **This is a fork** of [shanekunz/opencode-telegram-group-topics-bot](https://github.com/shanekunz/opencode-telegram-group-topics-bot),
+> itself derived from [grinev/opencode-telegram-bot](https://github.com/grinev/opencode-telegram-bot) by Ruslan Grinev.
+> This fork adds bug fixes for path-entry, `/cancel`, SSE stream shutdown, session directory
+> routing, and new `/mcps`, `/models`, and `/projects` features. Part of the
+> [opencode-dev](https://github.com/gschadow/opencode-dev) portable deployment stack.
 
 - Use the upstream project if you want the simpler single-chat workflow.
 - Use this fork if you want one **General** control topic plus dedicated forum topics for parallel OpenCode sessions.
