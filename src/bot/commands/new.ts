@@ -11,6 +11,7 @@ import {
   setCurrentProject,
 } from "../../settings/manager.js";
 import { clearAllInteractionState } from "../../interaction/cleanup.js";
+import { questionManager } from "../../question/manager.js";
 import { summaryAggregator } from "../../summary/aggregator.js";
 import { pinnedMessageManager } from "../../pinned/manager.js";
 import { keyboardManager } from "../../keyboard/manager.js";
@@ -136,6 +137,19 @@ export function createNewCommand(deps: NewCommandDeps) {
     try {
       const scope = getScopeFromContext(ctx);
       const scopeKey = scope?.key ?? GLOBAL_SCOPE_KEY;
+
+      // /new makes any pending questionnaire moot — dismiss it (and delete its
+      // message) before doing anything else.
+      if (questionManager.isActive(scopeKey)) {
+        const questionMessageIds = questionManager.getMessageIds(scopeKey);
+        for (const messageId of questionMessageIds) {
+          if (ctx.chat?.id) {
+            await ctx.api.deleteMessage(ctx.chat.id, messageId).catch(() => {});
+          }
+        }
+        clearAllInteractionState(INTERACTION_CLEAR_REASON.SESSION_CREATED, scopeKey);
+        logger.info(`[NewCommand] Dismissed active questionnaire for scope ${scopeKey}`);
+      }
 
       if (isTopicScope(scope)) {
         await ctx.reply(t(BOT_I18N_KEY.NEW_TOPIC_ONLY_IN_GENERAL));

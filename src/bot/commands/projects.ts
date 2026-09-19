@@ -34,6 +34,32 @@ const PROJECT_PAGE_CALLBACK_PREFIX = "projects:page:";
 const PROJECT_SELECT_CALLBACK_PREFIX = "project:";
 const PROJECT_ENTER_PATH_CALLBACK = "projects:enter_path";
 
+// Telegram enforces a 64-byte hard limit on InlineKeyboardButton callback_data.
+// Project ids are full worktree paths (e.g. /home/gunther/opencode-dev/...), so
+// `project:<id>` routinely exceeds 64 bytes → BUTTON_DATA_INVALID. Map long ids
+// to short `#N` references (same technique as the /open file browser).
+const projectIdIndex = new Map<string, string>();
+let projectIdCounter = 0;
+
+function encodeProjectIdForCallback(projectId: string): string {
+  const naive = `${PROJECT_SELECT_CALLBACK_PREFIX}${projectId}`;
+  if (Buffer.byteLength(naive, "utf-8") <= 64) {
+    return naive;
+  }
+
+  const key = `#${projectIdCounter++}`;
+  projectIdIndex.set(key, projectId);
+  return `${PROJECT_SELECT_CALLBACK_PREFIX}${key}`;
+}
+
+function decodeProjectIdFromCallback(data: string): string {
+  const raw = data.replace(PROJECT_SELECT_CALLBACK_PREFIX, "");
+  if (raw.startsWith("#")) {
+    return projectIdIndex.get(raw) ?? "";
+  }
+  return raw;
+}
+
 interface ProjectsPaginationRange {
   page: number;
   totalPages: number;
@@ -169,7 +195,7 @@ function buildProjectsKeyboard(
       (project.id === currentProject.id || project.worktree === currentProject.worktree);
     const label = buildProjectButtonLabel(startIndex + index, project.worktree);
     const labelWithCheck = formatProjectButtonLabel(label, Boolean(isActive));
-    keyboard.text(labelWithCheck, `project:${project.id}`).row();
+    keyboard.text(labelWithCheck, encodeProjectIdForCallback(project.id)).row();
   });
 
   if (totalPages > 1) {
@@ -366,7 +392,7 @@ export async function handleProjectSelect(ctx: Context): Promise<boolean> {
     return true;
   }
 
-  const projectId = callbackQuery.data.replace(PROJECT_SELECT_CALLBACK_PREFIX, "");
+  const projectId = decodeProjectIdFromCallback(callbackQuery.data);
 
   const isActiveMenu = await ensureActiveInlineMenu(ctx, "project");
   if (!isActiveMenu) {
