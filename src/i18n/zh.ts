@@ -99,6 +99,7 @@ export const zh: I18nDictionary = {
   "status.line.mode": "代理：{mode}",
   "status.line.model": "模型：{model}",
   "status.line.tts": "TTS 回复：{tts}",
+  "status.line.session_id": "会话 ID：{id}",
   "status.tts.on": "开启",
   "status.tts.off": "关闭",
   "status.agent_not_set": "未设置",

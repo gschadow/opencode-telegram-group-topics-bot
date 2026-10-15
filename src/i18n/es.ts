@@ -113,6 +113,7 @@ export const es: I18nDictionary = {
   "status.line.mode": "Agente: {mode}",
   "status.line.model": "Modelo: {model}",
   "status.line.tts": "Respuestas TTS: {tts}",
+  "status.line.session_id": "ID de sesión: {id}",
   "status.tts.on": "Activadas",
   "status.tts.off": "Desactivadas",
   "status.agent_not_set": "no configurado",

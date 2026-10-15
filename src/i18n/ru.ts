@@ -107,6 +107,7 @@ export const ru: I18nDictionary = {
   "status.line.mode": "Агент: {mode}",
   "status.line.model": "Модель: {model}",
   "status.line.tts": "TTS-ответы: {tts}",
+  "status.line.session_id": "ID сессии: {id}",
   "status.tts.on": "Вкл",
   "status.tts.off": "Выкл",
   "status.agent_not_set": "не установлен",

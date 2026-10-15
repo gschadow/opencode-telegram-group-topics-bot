@@ -104,6 +104,7 @@ export async function statusCommand(ctx: CommandContext<Context>) {
     const currentSession = getCurrentSession(scopeKey);
     if (currentSession) {
       message += `\n${t("status.session_selected", { title: currentSession.title })}\n`;
+      message += `${t("status.line.session_id", { id: currentSession.id })}\n`;
     } else {
       message += `\n${t("status.session_not_selected")}\n`;
       message += t("status.session_hint");

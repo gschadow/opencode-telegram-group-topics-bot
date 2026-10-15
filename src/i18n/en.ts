@@ -112,6 +112,7 @@ export const en = {
   "status.line.mode": "Agent: {mode}",
   "status.line.model": "Model: {model}",
   "status.line.tts": "TTS replies: {tts}",
+  "status.line.session_id": "Session ID: {id}",
   "status.tts.on": "On",
   "status.tts.off": "Off",
   "status.agent_not_set": "not set",

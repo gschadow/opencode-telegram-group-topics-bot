@@ -113,6 +113,7 @@ export const de: I18nDictionary = {
   "status.line.mode": "Agent: {mode}",
   "status.line.model": "Modell: {model}",
   "status.line.tts": "TTS-Antworten: {tts}",
+  "status.line.session_id": "Sitzungs-ID: {id}",
   "status.tts.on": "Ein",
   "status.tts.off": "Aus",
   "status.agent_not_set": "nicht gesetzt",
