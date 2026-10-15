@@ -157,6 +157,8 @@ class PinnedMessageManager {
 
       let maxContextSize = 0;
       let totalAssistantCost = 0;
+      let lastRawContextSize = 0;
+      let summaryIsMostRecent = false;
       messagesData.forEach(({ info }) => {
         if (info.role !== "assistant") {
           return;
@@ -167,12 +169,21 @@ class PinnedMessageManager {
           cost?: number;
           tokens?: { input: number; cache?: { read: number } };
         };
-        if (assistantInfo.summary && !options.includeSummaries) {
-          return;
-        }
-
         const contextSize =
           (assistantInfo.tokens?.input || 0) + (assistantInfo.tokens?.cache?.read || 0);
+        if (assistantInfo.summary) {
+          // The server records the post-compaction context estimate on the summary
+          // message; its own usage would describe the pre-compaction head. Use it as
+          // the current size until a real provider turn supersedes it.
+          lastRawContextSize = contextSize;
+          summaryIsMostRecent = true;
+          if (!options.includeSummaries) {
+            return;
+          }
+        } else {
+          summaryIsMostRecent = false;
+        }
+
         if (contextSize > maxContextSize) {
           maxContextSize = contextSize;
         }
@@ -180,7 +191,7 @@ class PinnedMessageManager {
         totalAssistantCost += assistantInfo.cost || 0;
       });
 
-      context.state.tokensUsed = maxContextSize;
+      context.state.tokensUsed = summaryIsMostRecent ? lastRawContextSize : maxContextSize;
       context.state.assistantCost = totalAssistantCost;
       context.state.sessionId = sessionId;
       this.syncSharedContext(scopeKey);
