@@ -1,5 +1,5 @@
 import { CommandContext, Context } from "grammy";
-import { opencodeClient } from "../../opencode/client.js";
+import { fetchServerInfo, opencodeClient } from "../../opencode/client.js";
 import { processManager } from "../../process/manager.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
@@ -14,7 +14,7 @@ export async function opencodeStopCommand(ctx: CommandContext<Context>) {
     if (!processManager.isRunning()) {
       // Check if there's an external server running
       try {
-        const { data, error } = await opencodeClient.global.health();
+        const { data, error } = await fetchServerInfo();
 
         if (!error && data?.healthy) {
           await ctx.reply(t("opencode_stop.external_running"));

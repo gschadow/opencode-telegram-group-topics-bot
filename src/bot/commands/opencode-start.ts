@@ -1,5 +1,5 @@
 import { CommandContext, Context } from "grammy";
-import { opencodeClient } from "../../opencode/client.js";
+import { fetchServerInfo, opencodeClient } from "../../opencode/client.js";
 import { processManager } from "../../process/manager.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
@@ -16,7 +16,7 @@ async function waitForServerReady(maxWaitMs: number = 10000): Promise<boolean> {
 
   while (Date.now() - startTime < maxWaitMs) {
     try {
-      const { data, error } = await opencodeClient.global.health();
+      const { data, error } = await fetchServerInfo();
 
       if (!error && data?.healthy) {
         return true;
@@ -53,7 +53,7 @@ export async function opencodeStartCommand(ctx: CommandContext<Context>) {
 
     // 2. Check if server is accessible (external process)
     try {
-      const { data, error } = await opencodeClient.global.health();
+      const { data, error } = await fetchServerInfo();
 
       if (!error && data?.healthy) {
         await ctx.reply(
@@ -100,7 +100,7 @@ export async function opencodeStartCommand(ctx: CommandContext<Context>) {
     }
 
     // 6. Get server version and send success message
-    const { data: health } = await opencodeClient.global.health();
+    const { data: health } = await fetchServerInfo();
     await editBotText({
       api: ctx.api,
       chatId: ctx.chat.id,

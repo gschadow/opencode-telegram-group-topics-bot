@@ -14,6 +14,30 @@ export const opencodeClient = createOpencodeClient({
   headers: config.opencode.password ? { Authorization: getAuth() } : undefined,
 });
 
+// Liveness probe. The bundled SDK's `global.health()` still targets the v1
+// `/global/health`, which the v2 server removed (non-/api paths hit the web-UI
+// fallback and 500). The v2 equivalent is `/api/info`. Return the same
+// `{ data?, error? }` shape so existing call sites keep working.
+export async function fetchServerInfo(): Promise<{
+  data?: { healthy: boolean; version?: string };
+  error?: unknown;
+}> {
+  try {
+    const auth = getAuth();
+    const response = await fetch(`${config.opencode.apiUrl.replace(/\/+$/, "")}/api/info`, {
+      headers: auth ? { Authorization: auth } : undefined,
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) {
+      return { error: new Error(`Server info request failed: HTTP ${response.status}`) };
+    }
+    const body = (await response.json()) as { version?: string };
+    return { data: { healthy: true, version: body.version } };
+  } catch (error) {
+    return { error };
+  }
+}
+
 // The server's workspace routing ignores the `directory` field in the session
 // creation body — it reads the working directory exclusively from the
 // `x-opencode-directory` request header (or query parameter).  The generated

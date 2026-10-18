@@ -1,5 +1,5 @@
 import { CommandContext, Context } from "grammy";
-import { opencodeClient } from "../../opencode/client.js";
+import { fetchServerInfo, opencodeClient } from "../../opencode/client.js";
 import { getCurrentSession } from "../../session/manager.js";
 import { getCurrentProject, isTtsEnabled } from "../../settings/manager.js";
 import { fetchCurrentAgent } from "../../agent/manager.js";
@@ -19,7 +19,7 @@ export async function statusCommand(ctx: CommandContext<Context>) {
     const scope = getScopeFromContext(ctx);
     const usePinned = ctx.chat?.type !== "private";
     const isPrivateChat = ctx.chat?.type === "private";
-    const { data, error } = await opencodeClient.global.health();
+    const { data, error } = await fetchServerInfo();
 
     if (error || !data) {
       throw error || new Error("No data received from server");
