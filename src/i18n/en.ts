@@ -14,6 +14,7 @@ export const en = {
   "cmd.description.skills": "Skills catalog",
   "cmd.description.mcps": "List MCP server statuses",
   "cmd.description.models": "Select model",
+  "cmd.description.costlimit": "Set a session cost limit (USD)",
   "cmd.description.model": "Select model",
   "cmd.description.agent": "Select agent",
   "cmd.description.cleanup": "Close stale topic threads",
@@ -21,6 +22,7 @@ export const en = {
   "cmd.description.opencode_stop": "Stop OpenCode server",
   "cmd.description.help": "Help",
   "cmd.description.open": "Add a project by browsing directories",
+  "cmd.description.compact": "Compact session context",
 
   "callback.unknown_command": "Unknown command",
   "callback.processing_error": "Processing error",
@@ -75,10 +77,6 @@ export const en = {
   "bot.session_created": "✅ Session created: {title}",
   "bot.session_busy":
     "⏳ Your last request is still running, so this new one was not started.\n\nWhy this happened: OpenCode accepts one active run per session.\nWhat to do: wait for the current reply, or use /abort if it seems stuck, then send your message again.",
-  "bot.session_queued":
-    "📝 Your message was queued for this session.\n\nQueue position: {position}\nWhat happens next: it will start automatically after the current run finishes.",
-  "bot.session_queue_started":
-    "▶️ Starting the next queued message for this session.\n\nQueued message:\n{preview}",
   "bot.session_reset_project_mismatch":
     "⚠️ Active session does not match the selected project, so it was reset. Use /sessions to pick one or /new to create a new session.",
   "bot.prompt_send_error":
@@ -111,6 +109,8 @@ export const en = {
   "status.line.uptime_sec": "Uptime: {seconds} sec",
   "status.line.mode": "Agent: {mode}",
   "status.line.model": "Model: {model}",
+  "status.line.cost": "Cost: ${cost}",
+  "status.line.tokens": "Tokens: {tokens}",
   "status.line.tts": "TTS replies: {tts}",
   "status.line.session_id": "Session ID: {id}",
   "status.tts.on": "On",
@@ -122,6 +122,10 @@ export const en = {
   "status.session_selected": "📋 Current session: {title}",
   "status.session_not_selected": "📋 Current session: not selected",
   "status.session_hint": "Use /sessions to select one or /new to create one",
+  "costlimit.invalid": "Please provide a limit in USD, e.g. /costlimit 2.50",
+  "costlimit.no_session": "No session selected. Use /new or /sessions first.",
+  "costlimit.set": "Cost limit set to ${limit} USD for this session.",
+  "costlimit.error": "🔴 Failed to set cost limit.",
   "status.global_overview": "📈 Global overview",
   "status.global_projects": "Projects: {count}",
   "status.global_sessions": "Sessions: {count}",
@@ -371,6 +375,16 @@ export const en = {
   "model.menu.favorites_hint":
     "ℹ️ Add models to favorites in OpenCode CLI to keep them at the top.",
   "model.menu.error": "🔴 Failed to get models list",
+  "model.menu.browse": "📚 All models:",
+  "model.menu.browse_empty": "No models on this page",
+  "model.menu.page_indicator": "Page {current}/{total}",
+  "model.button.all_models": "📚 All models",
+  "model.button.favorites": "⭐ Favorites",
+  "model.button.prev_page": "⬅️ Previous",
+  "model.button.next_page": "Next ➡️",
+  "model.page_empty_callback": "No models on this page",
+  "model.page_load_error_callback": "Cannot load this page. Please try again.",
+  "model.browse_error": "🔴 Failed to load models list",
 
   "variant.model_not_selected_callback": "Error: model is not selected",
   "variant.changed_callback": "Variant changed: {name}",

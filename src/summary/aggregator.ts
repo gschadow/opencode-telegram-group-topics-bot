@@ -237,6 +237,7 @@ class SummaryAggregator {
   private static readonly COMPLETION_DEBOUNCE_MS = 100;
 
   private trackedSessionIds: Set<string> = new Set();
+  private sessionTrackingResolver: ((sessionId: string) => boolean) | null = null;
   private currentMessageParts: Map<string, string[]> = new Map();
   private pendingParts: Map<string, string[]> = new Map();
   private messages: Map<string, { role: string; sessionId: string }> = new Map();
@@ -270,6 +271,7 @@ class SummaryAggregator {
   private partTypesByPartId: Map<string, string> = new Map();
   private messageBootstrappedFromDeltas: Set<string> = new Set();
   private partHashes: Map<string, Set<string>> = new Map();
+  private deltaTextLengthByPartId: Map<string, Map<string, number>> = new Map();
   private completionTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
   private stepFinishCosts: Map<string, number> = new Map();
   private lastStreamedMessageText: Map<string, string> = new Map();
@@ -285,12 +287,33 @@ class SummaryAggregator {
     return `${sessionId}:${messageId}`;
   }
 
+  /**
+   * Session tracking decides which sessions' events are aggregated and relayed.
+   *
+   * Historically this set was only populated when the bot itself submitted a
+   * prompt (or the user explicitly switched/created a session), which meant a
+   * turn initiated anywhere else (typed at the computer, injected via
+   * `prompt_async`, scheduled task) was silently dropped — even when a Telegram
+   * channel was bound to that very session.
+   *
+   * The resolver lets the caller decide whether a session is connected to a
+   * Telegram route, independent of who initiated the turn. Tracking must never
+   * depend on the origin of the prompt.
+   */
+  setSessionTrackingResolver(resolver: ((sessionId: string) => boolean) | null): void {
+    this.sessionTrackingResolver = resolver;
+  }
+
   private isTrackedSession(sessionId: string): boolean {
-    return this.trackedSessionIds.has(sessionId);
+    if (this.trackedSessionIds.has(sessionId)) {
+      return true;
+    }
+
+    return this.sessionTrackingResolver?.(sessionId) ?? false;
   }
 
   private getParentSessionId(sessionId: string): string | null {
-    if (this.trackedSessionIds.has(sessionId)) {
+    if (this.isTrackedSession(sessionId)) {
       return sessionId;
     }
 
@@ -579,6 +602,7 @@ class SummaryAggregator {
       this.stepFinishCosts.delete(messageKey);
       this.lastStreamedMessageText.delete(messageKey);
       this.thinkingFiredForMessages.delete(messageKey);
+      this.deltaTextLengthByPartId.delete(messageKey);
       this.reasoningTexts.delete(messageKey);
       this.reasoningHashes.delete(messageKey);
       this.reasoningPartIds.delete(messageKey);
@@ -613,6 +637,7 @@ class SummaryAggregator {
     this.messageBootstrappedFromDeltas.clear();
     this.stepFinishCosts.clear();
     this.lastStreamedMessageText.clear();
+    this.deltaTextLengthByPartId.clear();
     for (const timer of this.completionTimers.values()) {
       clearTimeout(timer);
     }
@@ -884,7 +909,7 @@ class SummaryAggregator {
   ): void {
     const info = (event.properties as { info?: { id?: string; parentID?: string; title?: string } })
       .info;
-    if (!info?.id || !info.parentID || !this.trackedSessionIds.has(info.parentID)) {
+    if (!info?.id || !info.parentID || !this.isTrackedSession(info.parentID)) {
       return;
     }
 
@@ -1134,11 +1159,22 @@ class SummaryAggregator {
       if (reasoningChunk) {
         const prevPartId = this.reasoningPartIds.get(messageKey);
         if (part.id !== prevPartId) {
-          this.reasoningTexts.set(messageKey, "");
-          this.reasoningHashes.delete(messageKey);
+          // A new reasoning part: append its chunk to whatever was accumulated so
+          // the thinking stream keeps growing instead of overwriting prior parts.
           this.reasoningPartIds.set(messageKey, part.id);
+          this.reasoningHashes.delete(messageKey);
+          this.reasoningTexts.set(
+            messageKey,
+            (this.reasoningTexts.get(messageKey) ?? "") + reasoningChunk,
+          );
+        } else {
+          // Same part reporting its cumulative text: keep the longest form so
+          // delta-accumulated content is never replaced by a shorter snapshot.
+          const previous = this.reasoningTexts.get(messageKey) ?? "";
+          if (reasoningChunk.length >= previous.length) {
+            this.reasoningTexts.set(messageKey, reasoningChunk);
+          }
         }
-      this.reasoningTexts.set(messageKey, reasoningChunk);
       }
 
       if (this.onThinkingCallback) {
@@ -1167,7 +1203,22 @@ class SummaryAggregator {
         }
 
         const parts = this.currentMessageParts.get(messageKey)!;
-        parts.push(part.text);
+        const partDeltas = this.deltaTextLengthByPartId.get(messageKey);
+        const deltaLength = partDeltas?.get(part.id) ?? 0;
+
+        if (deltaLength > 0) {
+          // This part was streamed via message.part.delta events, which already
+          // accumulated its text. Only append the tail the deltas did not cover
+          // (e.g. after a reconnect gap), then mark the part as reconciled so a
+          // later cumulative update cannot double-append.
+          const tail = part.text.slice(deltaLength);
+          if (tail) {
+            parts.push(tail);
+            partDeltas?.set(part.id, part.text.length);
+          }
+        } else {
+          parts.push(part.text);
+        }
         this.emitMessageUpdated(messageKey, part.sessionID);
 
         if (this.completionTimers.has(messageKey)) {
@@ -1304,7 +1355,7 @@ class SummaryAggregator {
     const field = props.field as string | undefined;
     const delta = props.delta as string | undefined;
 
-    if (!sessionID || !messageID || field !== "text" || !delta) {
+    if (!sessionID || !messageID || !partID || field !== "text" || !delta) {
       logger.debug("[Aggregator] Delta filtered out", {
         hasSessionID: !!sessionID,
         hasMessageID: !!messageID,
@@ -1329,8 +1380,14 @@ class SummaryAggregator {
     const partType = partID ? this.partTypesByPartId.get(partID) : undefined;
 
     if (partType === "reasoning") {
+      const currentPartId = this.reasoningPartIds.get(messageKey);
+      if (currentPartId !== partID) {
+        this.reasoningPartIds.set(messageKey, partID);
+      }
+      const nextReasoningText = (this.reasoningTexts.get(messageKey) ?? "") + delta;
+      this.reasoningTexts.set(messageKey, nextReasoningText);
       if (this.onThinkingCallback) {
-        this.onThinkingCallback(sessionID, this.reasoningTexts.get(messageKey) || "");
+        this.onThinkingCallback(sessionID, nextReasoningText);
       }
       return;
     }
@@ -1345,8 +1402,15 @@ class SummaryAggregator {
         this.startTypingIndicator(sessionID);
       }
       const parts = this.currentMessageParts.get(messageKey)!;
-      parts.length = 0;
       parts.push(delta);
+
+      let partDeltas = this.deltaTextLengthByPartId.get(messageKey);
+      if (!partDeltas) {
+        partDeltas = new Map();
+        this.deltaTextLengthByPartId.set(messageKey, partDeltas);
+      }
+      partDeltas.set(partID, (partDeltas.get(partID) ?? 0) + delta.length);
+
       logger.debug("[Aggregator] Text delta accumulated", {
         sessionID,
         messageID,
@@ -1765,6 +1829,7 @@ class SummaryAggregator {
     this.stepFinishCosts.delete(messageKey);
     this.lastStreamedMessageText.delete(messageKey);
     this.thinkingFiredForMessages.delete(messageKey);
+    this.deltaTextLengthByPartId.delete(messageKey);
 
     logger.debug(
       `[Aggregator] Message completed cleanup: remaining messages=${this.currentMessageParts.size}`,

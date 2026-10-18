@@ -4,6 +4,8 @@ import {
   getTelegramRetryAfterMs,
   isTelegramMarkdownParseError,
   isTelegramMessageNotModifiedError,
+  isTelegramMessageTooLongError,
+  retryOnTelegramRateLimit,
   sendMessageWithMarkdownFallback,
 } from "../../../src/bot/utils/send-with-markdown-fallback.js";
 
@@ -183,7 +185,7 @@ describe("bot/utils/send-with-markdown-fallback", () => {
   it("does not swallow non-markdown Telegram errors", async () => {
     const sendMessage = vi
       .fn()
-      .mockRejectedValueOnce(new Error("Bad Request: message is too long"));
+      .mockRejectedValueOnce(new Error("Bad Request: chat not found"));
 
     await expect(
       sendMessageWithMarkdownFallback({
@@ -192,9 +194,33 @@ describe("bot/utils/send-with-markdown-fallback", () => {
         text: "hello",
         parseMode: "MarkdownV2",
       }),
-    ).rejects.toThrow("message is too long");
+    ).rejects.toThrow("chat not found");
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to raw mode when MarkdownV2 escaping inflates the message past the length limit", async () => {
+    const sendMessage = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Bad Request: message is too long"))
+      .mockResolvedValueOnce({ message_id: 7 });
+
+    await sendMessageWithMarkdownFallback({
+      api: { sendMessage },
+      chatId: 123,
+      text: "\\_escaped\\_",
+      parseMode: "MarkdownV2",
+    });
+
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+    expect(sendMessage).toHaveBeenNthCalledWith(2, 123, "_escaped_", undefined);
+  });
+
+  it("detects message-too-long errors", () => {
+    expect(
+      isTelegramMessageTooLongError(new Error("Bad Request: message is too long")),
+    ).toBe(true);
+    expect(isTelegramMessageTooLongError(new Error("network timeout"))).toBe(false);
   });
 
   it("detects parse errors from api error description fields", () => {
@@ -370,5 +396,36 @@ describe("bot/utils/send-with-markdown-fallback", () => {
 
     expect(editMessageText).toHaveBeenCalledTimes(3);
     expect(editMessageText).toHaveBeenNthCalledWith(3, 112, 223, "Done.", undefined);
+  });
+
+  it("retries a 429 operation after retry_after and resolves", async () => {
+    vi.useFakeTimers();
+    try {
+      const operation = vi
+        .fn()
+        .mockRejectedValueOnce({ parameters: { retry_after: 2 } })
+        .mockResolvedValueOnce("ok");
+      const onRetry = vi.fn();
+
+      const promise = retryOnTelegramRateLimit(operation, onRetry);
+      await vi.advanceTimersByTimeAsync(2100);
+
+      await expect(promise).resolves.toBe("ok");
+      expect(operation).toHaveBeenCalledTimes(2);
+      expect(onRetry).toHaveBeenCalledWith(2000, 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rethrows a non-rate-limit error without retrying", async () => {
+    const operation = vi.fn().mockRejectedValue(new Error("Bad Request: chat not found"));
+    const onRetry = vi.fn();
+
+    await expect(retryOnTelegramRateLimit(operation, onRetry)).rejects.toThrow(
+      "chat not found",
+    );
+    expect(operation).toHaveBeenCalledTimes(1);
+    expect(onRetry).not.toHaveBeenCalled();
   });
 });

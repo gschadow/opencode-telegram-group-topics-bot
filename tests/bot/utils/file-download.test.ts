@@ -1,10 +1,25 @@
-import { describe, expect, it } from "vitest";
+import fs from "node:fs/promises";
+import http from "node:http";
+import os from "node:os";
+import path from "node:path";
+import type { AddressInfo } from "node:net";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Api } from "grammy";
 import {
+  downloadTelegramFile,
+  removeDownloadedFile,
+  streamUrlToFile,
   toDataUri,
   formatFileSize,
   isFileSizeAllowed,
   isTextMimeType,
 } from "../../../src/bot/utils/file-download.js";
+
+const httpsGetMock = vi.hoisted(() => vi.fn());
+
+vi.mock("node:https", async () => {
+  return { get: httpsGetMock, default: { get: httpsGetMock } };
+});
 
 describe("bot/utils/file-download", () => {
   describe("toDataUri", () => {
@@ -105,6 +120,226 @@ describe("bot/utils/file-download", () => {
 
     it("returns false for empty string", () => {
       expect(isTextMimeType("")).toBe(false);
+    });
+  });
+
+  describe("downloadTelegramFile", () => {
+    beforeEach(async () => {
+      httpsGetMock.mockClear();
+      const { Readable } = await import("node:stream");
+      httpsGetMock.mockImplementation(
+        (_url: string, _options: unknown, callback: (response: unknown) => void) => {
+          const response = Readable.from([Buffer.from("binary-audio-data")]) as NodeJS.ReadableStream & {
+            statusCode?: number;
+            headers?: Record<string, string | undefined>;
+          };
+          response.statusCode = 200;
+          response.headers = {};
+          callback(response);
+          return { on: vi.fn(), setTimeout: vi.fn(), destroy: vi.fn() };
+        },
+      );
+    });
+
+    afterAll(async () => {
+      await fs.rm(path.join(os.tmpdir(), "opencode-telegram-bot-downloads"), {
+        recursive: true,
+        force: true,
+      });
+    });
+
+    it("copies a file when file_path is an absolute local path (local Bot API server)", async () => {
+      const sourcePath = path.join(
+        os.tmpdir(),
+        `src-audio-${Date.now()}-${Math.random().toString(36).slice(2)}.ogg`,
+      );
+      await fs.writeFile(sourcePath, "local-audio-content");
+
+      const api = {
+        getFile: vi.fn().mockResolvedValue({ file_path: sourcePath, file_size: 20 }),
+      } as unknown as Api;
+
+      try {
+        const result = await downloadTelegramFile(api, "file-id");
+
+        expect(result.fileName).toBe(path.basename(sourcePath));
+        expect(result.fileSize).toBe(Buffer.byteLength("local-audio-content"));
+        expect(await fs.readFile(result.localPath, "utf-8")).toBe("local-audio-content");
+        expect(httpsGetMock).not.toHaveBeenCalled();
+      } finally {
+        await fs.rm(sourcePath, { force: true });
+      }
+    });
+
+    it("does not reject files larger than 20MB and streams them to disk", async () => {
+      const api = {
+        getFile: vi.fn().mockResolvedValue({
+          file_path: "audio/file_1.oga",
+          file_size: 30 * 1024 * 1024,
+        }),
+      } as unknown as Api;
+
+      const result = await downloadTelegramFile(api, "file-id");
+
+      expect(httpsGetMock).toHaveBeenCalled();
+      expect(result.fileName).toBe("file_1.oga");
+      expect(result.fileSize).toBe(Buffer.byteLength("binary-audio-data"));
+      expect(await fs.readFile(result.localPath, "utf-8")).toBe("binary-audio-data");
+
+      await removeDownloadedFile(result.localPath);
+    });
+
+    it("throws when Telegram returns no file_path", async () => {
+      const api = {
+        getFile: vi.fn().mockResolvedValue({ file_size: 10 }),
+      } as unknown as Api;
+
+      await expect(downloadTelegramFile(api, "file-id")).rejects.toThrow(
+        "File path not available from Telegram",
+      );
+      expect(api.getFile).toHaveBeenCalledTimes(1);
+    });
+
+    it("retries a transient getFile failure and then succeeds", async () => {
+      const resetError = Object.assign(new Error("socket hang up"), { code: "ECONNRESET" });
+      const api = {
+        getFile: vi
+          .fn()
+          .mockRejectedValueOnce(resetError)
+          .mockResolvedValueOnce({ file_path: "audio/file_1.oga", file_size: 18 }),
+      } as unknown as Api;
+
+      const result = await downloadTelegramFile(api, "file-id", { retryBaseDelayMs: 0 });
+
+      expect(api.getFile).toHaveBeenCalledTimes(2);
+      expect(httpsGetMock).toHaveBeenCalledTimes(1);
+      expect(await fs.readFile(result.localPath, "utf-8")).toBe("binary-audio-data");
+
+      await removeDownloadedFile(result.localPath);
+    });
+
+    it("retries a transient HTTP 5xx response and then succeeds", async () => {
+      const api = {
+        getFile: vi.fn().mockResolvedValue({ file_path: "audio/file_1.oga", file_size: 18 }),
+      } as unknown as Api;
+
+      const { Readable } = await import("node:stream");
+      httpsGetMock.mockImplementationOnce(
+        (_url: string, _options: unknown, callback: (response: unknown) => void) => {
+          const response = Readable.from([]) as NodeJS.ReadableStream & {
+            statusCode?: number;
+            headers?: Record<string, string | undefined>;
+          };
+          response.statusCode = 503;
+          response.headers = {};
+          callback(response);
+          return { on: vi.fn(), setTimeout: vi.fn(), destroy: vi.fn() };
+        },
+      );
+
+      const result = await downloadTelegramFile(api, "file-id", { retryBaseDelayMs: 0 });
+
+      expect(httpsGetMock).toHaveBeenCalledTimes(2);
+      expect(await fs.readFile(result.localPath, "utf-8")).toBe("binary-audio-data");
+
+      await removeDownloadedFile(result.localPath);
+    });
+
+    it("gives up after exhausting all attempts", async () => {
+      const api = {
+        getFile: vi.fn().mockRejectedValue(new Error("socket hang up")),
+      } as unknown as Api;
+
+      await expect(
+        downloadTelegramFile(api, "file-id", { maxAttempts: 3, retryBaseDelayMs: 0 }),
+      ).rejects.toThrow("socket hang up");
+      expect(api.getFile).toHaveBeenCalledTimes(3);
+    });
+
+    it("does not retry permanent failures (file is too big)", async () => {
+      const api = {
+        getFile: vi.fn().mockRejectedValue(new Error("Bad Request: file is too big")),
+      } as unknown as Api;
+
+      await expect(downloadTelegramFile(api, "file-id")).rejects.toThrow("file is too big");
+      expect(api.getFile).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("streamUrlToFile", () => {
+    it("streams an HTTP response body to disk and returns the byte count", async () => {
+      const payload = Buffer.from("streamed-payload-bytes");
+      const server = http.createServer((_req, res) => {
+        res.writeHead(200, { "Content-Type": "application/octet-stream" });
+        res.end(payload);
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const { port } = server.address() as AddressInfo;
+
+      const destPath = path.join(
+        os.tmpdir(),
+        `stream-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      );
+
+      try {
+        const bytes = await streamUrlToFile(`http://127.0.0.1:${port}/file`, destPath);
+        expect(bytes).toBe(payload.length);
+        expect(await fs.readFile(destPath)).toEqual(payload);
+      } finally {
+        await fs.rm(destPath, { force: true });
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    });
+
+    it("follows redirects", async () => {
+      const payload = Buffer.from("redirected-payload");
+      const server = http.createServer((req, res) => {
+        if (req.url === "/redirect") {
+          res.writeHead(302, { Location: "/file" });
+          res.end();
+          return;
+        }
+        res.writeHead(200);
+        res.end(payload);
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const { port } = server.address() as AddressInfo;
+
+      const destPath = path.join(
+        os.tmpdir(),
+        `stream-redirect-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      );
+
+      try {
+        const bytes = await streamUrlToFile(`http://127.0.0.1:${port}/redirect`, destPath);
+        expect(bytes).toBe(payload.length);
+        expect(await fs.readFile(destPath)).toEqual(payload);
+      } finally {
+        await fs.rm(destPath, { force: true });
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    });
+
+    it("rejects on non-2xx responses", async () => {
+      const server = http.createServer((_req, res) => {
+        res.writeHead(404);
+        res.end();
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const { port } = server.address() as AddressInfo;
+
+      const destPath = path.join(
+        os.tmpdir(),
+        `stream-404-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      );
+
+      try {
+        await expect(
+          streamUrlToFile(`http://127.0.0.1:${port}/missing`, destPath),
+        ).rejects.toThrow("failed with HTTP 404");
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
     });
   });
 });

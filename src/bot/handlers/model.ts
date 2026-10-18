@@ -1,14 +1,17 @@
 import { Context, InlineKeyboard } from "grammy";
+import { opencodeClient } from "../../opencode/client.js";
 import { selectModel, fetchCurrentModel, getModelSelectionLists } from "../../model/manager.js";
 import { formatModelForDisplay } from "../../model/types.js";
 import type { FavoriteModel, ModelInfo, ModelSelectionLists } from "../../model/types.js";
 import { formatVariantForButton } from "../../variant/manager.js";
 import { logger } from "../../utils/logger.js";
+import { config } from "../../config.js";
 import { createMainKeyboard } from "../utils/keyboard.js";
 import { getStoredAgent, resolveProjectAgent } from "../../agent/manager.js";
 import { pinnedMessageManager } from "../../pinned/manager.js";
 import { keyboardManager } from "../../keyboard/manager.js";
 import {
+  appendInlineMenuCancelButton,
   clearActiveInlineMenu,
   ensureActiveInlineMenu,
   replyWithInlineMenu,
@@ -21,6 +24,227 @@ import {
   getScopeKeyFromContext,
   getThreadSendOptions,
 } from "../scope.js";
+
+const MODEL_CATALOG_PAGE_CALLBACK_PREFIX = "model:page:";
+const MODEL_BROWSE_CALLBACK = "model:browse";
+const MODEL_FAVORITES_CALLBACK = "model:favorites";
+const MAX_INLINE_BUTTON_LABEL_LENGTH = 64;
+
+interface CatalogModel {
+  providerID: string;
+  modelID: string;
+}
+
+interface ModelsPaginationRange {
+  page: number;
+  totalPages: number;
+  startIndex: number;
+  endIndex: number;
+}
+
+async function getCatalogModels(): Promise<CatalogModel[]> {
+  const { data, error } = await opencodeClient.config.providers();
+
+  if (error || !data) {
+    throw error || new Error("No data received from server");
+  }
+
+  const models: CatalogModel[] = [];
+
+  for (const provider of data.providers) {
+    for (const modelID of Object.keys(provider.models)) {
+      models.push({ providerID: provider.id, modelID });
+    }
+  }
+
+  return models;
+}
+
+export function calculateModelsPaginationRange(
+  totalModels: number,
+  page: number,
+  pageSize: number,
+): ModelsPaginationRange {
+  const safePageSize = Math.max(1, pageSize);
+  const totalPages = Math.max(1, Math.ceil(totalModels / safePageSize));
+  const normalizedPage = Math.min(Math.max(0, page), totalPages - 1);
+  const startIndex = normalizedPage * safePageSize;
+  const endIndex = Math.min(startIndex + safePageSize, totalModels);
+
+  return {
+    page: normalizedPage,
+    totalPages,
+    startIndex,
+    endIndex,
+  };
+}
+
+export function parseModelPageCallback(data: string): number | null {
+  if (!data.startsWith(MODEL_CATALOG_PAGE_CALLBACK_PREFIX)) {
+    return null;
+  }
+
+  const rawPage = data.slice(MODEL_CATALOG_PAGE_CALLBACK_PREFIX.length);
+  if (!/^\d+$/.test(rawPage)) {
+    return null;
+  }
+
+  return Number.parseInt(rawPage, 10);
+}
+
+function formatCatalogModelButtonLabel(model: CatalogModel, isActive: boolean): string {
+  const prefix = isActive ? "✅ " : "";
+  const fullLabel = `${model.providerID}/${model.modelID}`;
+
+  if (fullLabel.length <= MAX_INLINE_BUTTON_LABEL_LENGTH - prefix.length) {
+    return `${prefix}${fullLabel}`;
+  }
+
+  return `${prefix}${fullLabel.slice(0, Math.max(0, MAX_INLINE_BUTTON_LABEL_LENGTH - prefix.length - 3))}...`;
+}
+
+function buildModelCatalogMenuText(page: number, totalPages: number): string {
+  const baseText = t("model.menu.browse");
+
+  if (totalPages <= 1) {
+    return baseText;
+  }
+
+  return `${baseText}\n\n${t("model.menu.page_indicator", {
+    current: String(page + 1),
+    total: String(totalPages),
+  })}`;
+}
+
+function buildModelCatalogKeyboard(
+  catalogModels: CatalogModel[],
+  page: number,
+  currentModel?: ModelInfo,
+): InlineKeyboard {
+  const keyboard = new InlineKeyboard();
+  const pageSize = config.bot.modelsListLimit;
+  const {
+    page: normalizedPage,
+    totalPages,
+    startIndex,
+    endIndex,
+  } = calculateModelsPaginationRange(catalogModels.length, page, pageSize);
+
+  catalogModels.slice(startIndex, endIndex).forEach((model) => {
+    const isActive =
+      currentModel &&
+      model.providerID === currentModel.providerID &&
+      model.modelID === currentModel.modelID;
+    const label = formatCatalogModelButtonLabel(model, Boolean(isActive));
+
+    keyboard.text(label, `model:${model.providerID}:${model.modelID}`).row();
+  });
+
+  if (totalPages > 1) {
+    if (normalizedPage > 0) {
+      keyboard.text(
+        t("model.button.prev_page"),
+        `${MODEL_CATALOG_PAGE_CALLBACK_PREFIX}${normalizedPage - 1}`,
+      );
+    }
+
+    if (normalizedPage < totalPages - 1) {
+      keyboard.text(
+        t("model.button.next_page"),
+        `${MODEL_CATALOG_PAGE_CALLBACK_PREFIX}${normalizedPage + 1}`,
+      );
+    }
+
+    keyboard.row();
+  }
+
+  keyboard.text(t("model.button.favorites"), MODEL_FAVORITES_CALLBACK).row();
+
+  return keyboard;
+}
+
+async function handleCatalogPage(ctx: Context, page: number): Promise<void> {
+  try {
+    const scopeKey = getScopeKeyFromContext(ctx);
+    const currentModel = fetchCurrentModel(scopeKey);
+    const catalogModels = await getCatalogModels();
+
+    if (catalogModels.length === 0) {
+      await ctx.answerCallbackQuery({ text: t("model.page_empty_callback") });
+      return;
+    }
+
+    const pageSize = config.bot.modelsListLimit;
+    const {
+      page: normalizedPage,
+      totalPages,
+      startIndex,
+    } = calculateModelsPaginationRange(catalogModels.length, page, pageSize);
+
+    if (startIndex >= catalogModels.length) {
+      await ctx.answerCallbackQuery({ text: t("model.page_empty_callback") });
+      return;
+    }
+
+    const keyboard = buildModelCatalogKeyboard(catalogModels, normalizedPage, currentModel);
+    appendInlineMenuCancelButton(keyboard, "model");
+
+    await ctx.editMessageText(buildModelCatalogMenuText(normalizedPage, totalPages), {
+      reply_markup: keyboard,
+    });
+    await ctx.answerCallbackQuery();
+  } catch (err) {
+    logger.error("[ModelHandler] Error loading model catalog page:", err);
+    await ctx.answerCallbackQuery({ text: t("model.page_load_error_callback") });
+  }
+}
+
+async function openCatalogBrowser(ctx: Context): Promise<void> {
+  try {
+    const scopeKey = getScopeKeyFromContext(ctx);
+    const currentModel = fetchCurrentModel(scopeKey);
+    const catalogModels = await getCatalogModels();
+
+    if (catalogModels.length === 0) {
+      await ctx.answerCallbackQuery({ text: t("model.menu.browse_empty") });
+      return;
+    }
+
+    const { totalPages } = calculateModelsPaginationRange(
+      catalogModels.length,
+      0,
+      config.bot.modelsListLimit,
+    );
+    const keyboard = buildModelCatalogKeyboard(catalogModels, 0, currentModel);
+    appendInlineMenuCancelButton(keyboard, "model");
+
+    await ctx.editMessageText(buildModelCatalogMenuText(0, totalPages), {
+      reply_markup: keyboard,
+    });
+    await ctx.answerCallbackQuery();
+  } catch (err) {
+    logger.error("[ModelHandler] Error opening model catalog:", err);
+    await ctx.answerCallbackQuery({ text: t("model.browse_error") });
+  }
+}
+
+async function showFavoritesMenu(ctx: Context): Promise<void> {
+  try {
+    const scopeKey = getScopeKeyFromContext(ctx);
+    const currentModel = fetchCurrentModel(scopeKey);
+    const { text, keyboard } = await buildFavoritesMenuView(currentModel);
+
+    appendInlineMenuCancelButton(keyboard, "model");
+
+    await ctx.editMessageText(text, {
+      reply_markup: keyboard,
+    });
+    await ctx.answerCallbackQuery();
+  } catch (err) {
+    logger.error("[ModelHandler] Error showing favorites menu:", err);
+    await ctx.answerCallbackQuery({ text: t("model.menu.error") });
+  }
+}
 
 function buildModelSelectionMenuText(modelLists: ModelSelectionLists): string {
   const lines = [t("model.menu.select"), t("model.menu.favorites_title")];
@@ -61,6 +285,22 @@ export async function handleModelSelect(ctx: Context): Promise<boolean> {
     const scopeKey = getScopeKeyFromContext(ctx);
     if (ctx.chat) {
       keyboardManager.initialize(ctx.api, ctx.chat.id, scopeKey);
+    }
+
+    const page = parseModelPageCallback(callbackQuery.data);
+    if (page !== null) {
+      await handleCatalogPage(ctx, page);
+      return true;
+    }
+
+    if (callbackQuery.data === MODEL_BROWSE_CALLBACK) {
+      await openCatalogBrowser(ctx);
+      return true;
+    }
+
+    if (callbackQuery.data === MODEL_FAVORITES_CALLBACK) {
+      await showFavoritesMenu(ctx);
+      return true;
     }
 
     // Parse callback data: "model:providerID:modelID"
@@ -155,11 +395,6 @@ export async function buildModelSelectionMenu(
   const favorites = lists.favorites;
   const recent = lists.recent;
 
-  if (favorites.length === 0 && recent.length === 0) {
-    logger.warn("[ModelHandler] No model choices found in favorites/recent");
-    return keyboard;
-  }
-
   const addButton = (model: FavoriteModel, prefix: string): void => {
     const isActive =
       currentModel &&
@@ -176,7 +411,21 @@ export async function buildModelSelectionMenu(
   favorites.forEach((model) => addButton(model, "⭐"));
   recent.forEach((model) => addButton(model, "🕘"));
 
+  keyboard.row().text(t("model.button.all_models"), MODEL_BROWSE_CALLBACK);
+
   return keyboard;
+}
+
+async function buildFavoritesMenuView(
+  currentModel?: ModelInfo,
+): Promise<{ text: string; keyboard: InlineKeyboard }> {
+  const modelLists = await getModelSelectionLists();
+  const keyboard = await buildModelSelectionMenu(currentModel, modelLists);
+
+  return {
+    text: buildModelSelectionMenuText(modelLists),
+    keyboard,
+  };
 }
 
 /**
@@ -185,18 +434,9 @@ export async function buildModelSelectionMenu(
  */
 export async function showModelSelectionMenu(ctx: Context): Promise<void> {
   try {
-    const threadId = getScopeFromContext(ctx)?.threadId ?? null;
     const scopeKey = getScopeKeyFromContext(ctx);
     const currentModel = fetchCurrentModel(scopeKey);
-    const modelLists = await getModelSelectionLists();
-    const keyboard = await buildModelSelectionMenu(currentModel, modelLists);
-
-    if (keyboard.inline_keyboard.length === 0) {
-      await ctx.reply(t("model.menu.empty"), getThreadSendOptions(threadId));
-      return;
-    }
-
-    const text = buildModelSelectionMenuText(modelLists);
+    const { text, keyboard } = await buildFavoritesMenuView(currentModel);
 
     await replyWithInlineMenu(ctx, {
       menuKind: "model",

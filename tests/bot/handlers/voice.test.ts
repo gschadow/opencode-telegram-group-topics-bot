@@ -1,3 +1,6 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Context } from "grammy";
 import { t } from "../../../src/i18n/index.js";
@@ -47,9 +50,14 @@ function createVoiceDeps(overrides: Partial<VoiceMessageDeps> = {}): {
   transcribeMock: ReturnType<typeof vi.fn>;
 } {
   const processPromptMock = vi.fn().mockResolvedValue(true);
-  const downloadMock = vi.fn().mockResolvedValue({
-    buffer: Buffer.from("audio"),
-    filename: "file_1.oga",
+  const downloadMock = vi.fn().mockImplementation(async () => {
+    const localPath = path.join(
+      os.tmpdir(),
+      `voice-test-${Date.now()}-${Math.random().toString(36).slice(2)}.oga`,
+    );
+    const content = "audio";
+    await fs.writeFile(localPath, content);
+    return { localPath, fileName: "file_1.oga", fileSize: Buffer.byteLength(content) };
   });
   const transcribeMock = vi.fn().mockResolvedValue({ text: "run tests" });
 

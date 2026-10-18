@@ -105,6 +105,23 @@ export async function statusCommand(ctx: CommandContext<Context>) {
     if (currentSession) {
       message += `\n${t("status.session_selected", { title: currentSession.title })}\n`;
       message += `${t("status.line.session_id", { id: currentSession.id })}\n`;
+      try {
+        const { data: sessionInfo } = await opencodeClient.session.get({
+          sessionID: currentSession.id,
+          directory: currentSession.directory,
+        });
+        const info = sessionInfo as
+          | { cost?: number; tokens?: { input?: number; output?: number } }
+          | undefined;
+        if (info?.cost !== undefined) {
+          message += `${t("status.line.cost", { cost: info.cost.toFixed(2) })}\n`;
+          message += `${t("status.line.tokens", {
+            tokens: `${info.tokens?.input ?? 0}/${info.tokens?.output ?? 0}`,
+          })}\n`;
+        }
+      } catch (error) {
+        logger.debug("[Bot] Failed to fetch session cost:", error);
+      }
     } else {
       message += `\n${t("status.session_not_selected")}\n`;
       message += t("status.session_hint");

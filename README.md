@@ -147,6 +147,7 @@ If that works, your group workspace is ready.
 | `/projects`       | Switch between OpenCode projects                        |
 | `/tts`            | Toggle audio replies globally                           |
 | `/rename`         | Rename the current session                              |
+| `/compact`        | Compact the current session context                     |
 | `/commands`       | Browse and run custom commands                          |
 | `/task`           | Create a scheduled task for the current project         |
 | `/tasklist`       | List and delete scheduled tasks for the current project |
@@ -197,6 +198,7 @@ Installed-mode config paths:
 | `SESSIONS_LIST_LIMIT`              | Sessions per page in `/sessions`                                                     |    No    | `10`                     |
 | `PROJECTS_LIST_LIMIT`              | Projects per page in `/projects`                                                     |    No    | `10`                     |
 | `COMMANDS_LIST_LIMIT`              | Commands per page in `/commands`                                                     |    No    | `10`                     |
+| `MODELS_LIST_LIMIT`                | Models per page in `/models` catalog browse                                          |    No    | `10`                     |
 | `SCHEDULED_TASK_POLL_INTERVAL_SEC` | Scheduled task poll interval in seconds                                              |    No    | `30`                     |
 | `SERVICE_MESSAGES_INTERVAL_SEC`    | Service messages interval; keep `>=2` to avoid Telegram rate limits, `0` = immediate |    No    | `5`                      |
 | `HIDE_THINKING_MESSAGES`           | Hide `Thinking...` service messages                                                  |    No    | `false`                  |

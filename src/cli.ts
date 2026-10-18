@@ -4,6 +4,7 @@ import type { RuntimeMode } from "./runtime/mode.js";
 import { parseCliArgs } from "./cli/args.js";
 import { resolveRuntimeMode, setRuntimeMode } from "./runtime/mode.js";
 import { getRuntimePaths } from "./runtime/paths.js";
+import { installProcessErrorHandlers } from "./runtime/process-error-handlers.js";
 import { t } from "./i18n/index.js";
 
 const EXIT_SUCCESS = 0;
@@ -212,6 +213,8 @@ async function runStopCommand(): Promise<number> {
 }
 
 async function runCli(argv: string[]): Promise<number> {
+  installProcessErrorHandlers();
+
   const parsedArgs = parseCliArgs(argv);
 
   if (parsedArgs.error) {

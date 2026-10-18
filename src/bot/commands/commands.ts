@@ -357,27 +357,6 @@ function parseSelectIndex(data: string): number | null {
   return index;
 }
 
-async function isSessionBusy(sessionId: string, directory: string): Promise<boolean> {
-  try {
-    const { data, error } = await opencodeClient.session.status({ directory });
-
-    if (error || !data) {
-      logger.warn("[Commands] Failed to check session status before command:", error);
-      return false;
-    }
-
-    const sessionStatus = (data as Record<string, { type?: string }>)[sessionId];
-    if (!sessionStatus) {
-      return false;
-    }
-
-    return sessionStatus.type === "busy";
-  } catch (err) {
-    logger.warn("[Commands] Error checking session status before command:", err);
-    return false;
-  }
-}
-
 async function ensureSessionForProject(
   ctx: Context,
   projectDirectory: string,
@@ -456,12 +435,6 @@ async function executeCommand(
 
   await deps.ensureEventSubscription(session.directory);
   summaryAggregator.setSession(session.id);
-
-  const sessionIsBusy = await isSessionBusy(session.id, session.directory);
-  if (sessionIsBusy) {
-    await ctx.reply(t("bot.session_busy"), getThreadSendOptions(threadId));
-    return;
-  }
 
   const scopeKey = getScopeKeyFromContext(ctx);
   const currentAgent = await resolveProjectAgent(getStoredAgent(scopeKey), scopeKey);

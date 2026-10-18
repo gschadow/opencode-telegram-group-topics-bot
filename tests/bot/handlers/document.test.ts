@@ -1,3 +1,6 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Context } from "grammy";
 import {
@@ -45,9 +48,14 @@ function createDocumentDeps(overrides: Partial<DocumentHandlerDeps> = {}): {
   getStoredModelMock: ReturnType<typeof vi.fn>;
 } {
   const processPromptMock = vi.fn().mockResolvedValue(true);
-  const downloadMock = vi.fn().mockResolvedValue({
-    buffer: Buffer.from("file content here"),
-    filePath: "documents/test.txt",
+  const downloadMock = vi.fn().mockImplementation(async () => {
+    const localPath = path.join(
+      os.tmpdir(),
+      `doc-test-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`,
+    );
+    const content = "file content here";
+    await fs.writeFile(localPath, content);
+    return { localPath, fileName: "test.txt", fileSize: Buffer.byteLength(content) };
   });
   const getCapabilitiesMock = vi.fn().mockResolvedValue({
     input: { pdf: true, image: true },

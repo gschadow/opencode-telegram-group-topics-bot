@@ -1,4 +1,5 @@
 import { Bot, Context, InputFile, NextFunction } from "grammy";
+import fs from "node:fs/promises";
 import { SocksProxyAgent } from "socks-proxy-agent";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import { config } from "../config.js";
@@ -11,6 +12,7 @@ import { startCommand } from "./commands/start.js";
 import { helpCommand } from "./commands/help.js";
 import { lastCommand } from "./commands/last.js";
 import { statusCommand } from "./commands/status.js";
+import { costLimitCommand } from "./commands/costlimit.js";
 import {
   AGENT_MODE_BUTTON_TEXT_PATTERN,
   MODEL_BUTTON_TEXT_PATTERN,
@@ -68,19 +70,17 @@ import { safeBackgroundTask } from "../utils/safe-background-task.js";
 import { pinnedMessageManager } from "../pinned/manager.js";
 import { taskCreationManager } from "../scheduled-task/creation-manager.js";
 import { t } from "../i18n/index.js";
-import {
-  clearPromptResponseMode,
-  dispatchNextQueuedPrompt,
-  processUserPrompt,
-} from "./handlers/prompt.js";
+import { clearPromptResponseMode, processUserPrompt } from "./handlers/prompt.js";
+import { queueCoalescedPrompt } from "./handlers/prompt-coalescer.js";
 import { handleVoiceMessage } from "./handlers/voice.js";
 import { handleDocumentMessage } from "./handlers/document.js";
-import { downloadTelegramFile, toDataUri } from "./utils/file-download.js";
+import { downloadTelegramFile, removeDownloadedFile, toDataUri } from "./utils/file-download.js";
 import { editBotRenderedPart, editBotText } from "./utils/telegram-text.js";
 import { sendBotRenderedPart, sendBotText } from "./utils/telegram-text.js";
 import {
   getTelegramRetryAfterMs,
   isTelegramMessageNotModifiedError,
+  retryOnTelegramRateLimit,
 } from "./utils/send-with-markdown-fallback.js";
 import { extractCommandName } from "./utils/commands.js";
 import {
@@ -89,7 +89,7 @@ import {
 } from "./utils/session-error-filter.js";
 import { getModelCapabilities, supportsInput } from "../model/capabilities.js";
 import { getStoredModel } from "../model/manager.js";
-import { getCurrentProject } from "../settings/manager.js";
+import { getCurrentProject, getScopedSessions } from "../settings/manager.js";
 import {
   GLOBAL_SCOPE_KEY,
   SCOPE_CONTEXT,
@@ -109,7 +109,7 @@ import { sendTtsResponseForSession } from "./utils/send-tts-response.js";
 import { consumePendingCompactionNotice } from "./utils/pending-compaction-notices.js";
 import { LiveStream } from "./streaming/live-stream.js";
 import { contextStateManager } from "../context/manager.js";
-import { getSessionById } from "../session/manager.js";
+import { getCurrentSession, getSessionById, setCurrentSession } from "../session/manager.js";
 import { loadLastAssistantMessage } from "../session/history.js";
 import { formatContextForButton } from "./utils/keyboard.js";
 import { SessionOutputCoordinator } from "./session-output-coordinator.js";
@@ -190,24 +190,32 @@ function getTargetBySessionId(
 
 function extractSessionTitleUpdate(
   event: OpenCodeEvent,
-): { sessionId: string; title: string } | null {
+): { sessionId: string; title: string; directory?: string } | null {
   if (event.type !== "session.updated") {
     return null;
   }
 
   const eventProperties = event.properties as {
-    info?: { id?: unknown; title?: unknown };
-    session?: { id?: unknown; title?: unknown };
+    info?: { id?: unknown; title?: unknown; directory?: unknown };
+    session?: { id?: unknown; title?: unknown; directory?: unknown };
     sessionID?: unknown;
     title?: unknown;
+    directory?: unknown;
   };
+
+  const infoDirectory =
+    typeof eventProperties.info?.directory === "string"
+      ? eventProperties.info.directory
+      : typeof eventProperties.directory === "string"
+        ? eventProperties.directory
+        : undefined;
 
   const infoSessionId =
     typeof eventProperties.info?.id === "string" ? eventProperties.info.id : null;
   const infoTitle =
     typeof eventProperties.info?.title === "string" ? eventProperties.info.title : null;
   if (infoSessionId && infoTitle) {
-    return { sessionId: infoSessionId, title: infoTitle };
+    return { sessionId: infoSessionId, title: infoTitle, directory: infoDirectory };
   }
 
   const sessionId =
@@ -224,11 +232,16 @@ function extractSessionTitleUpdate(
         ? eventProperties.title
         : null;
 
+  const sessionDirectory =
+    typeof eventProperties.session?.directory === "string"
+      ? eventProperties.session.directory
+      : infoDirectory;
+
   if (!sessionId || !title) {
     return null;
   }
 
-  return { sessionId, title };
+  return { sessionId, title, directory: sessionDirectory };
 }
 
 const TELEGRAM_DOCUMENT_CAPTION_MAX_LENGTH = 1024;
@@ -308,7 +321,6 @@ const sessionOutputCoordinator = new SessionOutputCoordinator({
   onFinalDeliveryCommitted: async (sessionId) => {
     summaryAggregator.stopTypingIndicator(sessionId);
     await liveStream.sealCurrentMessage(sessionId, true);
-    await dispatchNextQueuedPrompt(sessionId);
   },
   handlers: {
     onAssistantUpdate: async ({ sessionId, messageId, text }) => {
@@ -857,7 +869,8 @@ const liveStream = new LiveStream({
       rawFallbackText,
     ),
   editRenderedPart: async (sessionId, messageId, part, _includeKeyboard = false) => {
-    if (!botInstance) {
+    const activeBot = botInstance;
+    if (!activeBot) {
       return;
     }
 
@@ -866,12 +879,20 @@ const liveStream = new LiveStream({
       return;
     }
 
-    await editBotRenderedPart({
-      api: botInstance.api,
-      chatId: target.chatId,
-      messageId,
-      part,
-    });
+    await retryOnTelegramRateLimit(
+      () =>
+        editBotRenderedPart({
+          api: activeBot.api,
+          chatId: target.chatId,
+          messageId,
+          part,
+        }),
+      (retryAfterMs) =>
+        logger.info(
+          `[Bot] Telegram rate limit; retrying final in-place edit in ${retryAfterMs}ms`,
+          { sessionId, messageId },
+        ),
+    );
   },
   deleteText: deleteSessionMessage,
 });
@@ -1192,6 +1213,48 @@ async function ensureEventSubscription(directory: string): Promise<void> {
             });
           },
         });
+
+        // Reflect an opencode-side rename in the bot's own state: update the
+        // stored session title (used by /status) and refresh the pinned message.
+        // Without this, only forum-topic lanes were renamed; General/DM lanes
+        // kept showing the stale "New session - ..." title.
+        const target = getSessionRouteTarget(sessionTitleUpdate.sessionId);
+        if (target) {
+          const stored = getCurrentSession(target.scopeKey);
+          if (
+            stored &&
+            stored.id === sessionTitleUpdate.sessionId &&
+            stored.title !== sessionTitleUpdate.title
+          ) {
+            const directory =
+              sessionTitleUpdate.directory ??
+              stored.directory ??
+              getSessionById(sessionTitleUpdate.sessionId)?.directory;
+            if (directory) {
+              setCurrentSession(
+                { id: sessionTitleUpdate.sessionId, title: sessionTitleUpdate.title, directory },
+                target.scopeKey,
+              );
+              logger.info("[Bot] Synced session title from opencode", {
+                sessionId: sessionTitleUpdate.sessionId,
+                scopeKey: target.scopeKey,
+                title: sessionTitleUpdate.title,
+              });
+            }
+          }
+
+          safeBackgroundTask({
+            taskName: "pinned.session_title_from_event",
+            task: () =>
+              pinnedMessageManager.onSessionTitleUpdate(sessionTitleUpdate.title, target.scopeKey),
+            onError: (pinError) => {
+              logger.debug("[Bot] Failed to refresh pinned title from session.updated", {
+                sessionId: sessionTitleUpdate.sessionId,
+                pinError,
+              });
+            },
+          });
+        }
       }
 
       summaryAggregator.processEvent(event);
@@ -1211,10 +1274,44 @@ async function prepareSessionForPrompt(sessionId: string): Promise<void> {
   await liveStream.sealCurrentMessage(sessionId, true);
 }
 
+function restoreBoundSessionSubscriptions(): void {
+  const directories = new Set<string>();
+
+  for (const binding of listAllTopicBindings()) {
+    if (binding.projectWorktree) {
+      directories.add(binding.projectWorktree);
+    }
+  }
+
+  // Also cover General-lane / DM scoped sessions, which have no topic binding.
+  for (const session of Object.values(getScopedSessions())) {
+    if (session?.directory) {
+      directories.add(session.directory);
+    }
+  }
+
+  for (const directory of directories) {
+    void ensureEventSubscription(directory).catch((error) => {
+      logger.error("[Bot] Failed to restore event subscription for bound topic", {
+        directory,
+        error,
+      });
+    });
+  }
+}
+
 export function createBot(): Bot<Context> {
   clearAllInteractionState(INTERACTION_CLEAR_REASON.BOT_STARTUP);
 
   const botOptions: ConstructorParameters<typeof Bot<Context>>[1] = {};
+
+  if (config.telegram.apiRoot) {
+    botOptions.client = {
+      ...botOptions.client,
+      apiRoot: config.telegram.apiRoot,
+    };
+    logger.info(`[Bot] Using Telegram API root: ${config.telegram.apiRoot}`);
+  }
 
   if (config.telegram.proxyUrl) {
     const proxyUrl = config.telegram.proxyUrl;
@@ -1229,6 +1326,7 @@ export function createBot(): Bot<Context> {
     }
 
     botOptions.client = {
+      ...botOptions.client,
       baseFetchConfig: {
         agent,
         compress: true,
@@ -1239,8 +1337,32 @@ export function createBot(): Bot<Context> {
   const bot = new Bot(config.telegram.token, botOptions);
   bindBotInstance(bot);
 
+  // Relay policy: aggregate and deliver events for every session that is
+  // connected to a Telegram route (topic binding or scoped current session),
+  // regardless of who initiated the turn. The bot must not track whether a
+  // turn came from Telegram — a prompt typed at the computer or injected
+  // out-of-band is delivered to the bound channel just the same.
+  summaryAggregator.setSessionTrackingResolver(
+    (sessionId) => getSessionRouteTarget(sessionId) !== null,
+  );
+
   bot.api.config.use((prev, method, payload, signal) => {
     return telegramRateLimiter.enqueue(method, payload, () => prev(method, payload, signal));
+  });
+
+  // Force full update delivery on EVERY getUpdates poll. Telegram persists the
+  // last `allowed_updates` value server-side; grammY only passes it on the
+  // first poll and omits it afterwards, so a restrictive list set by an
+  // external caller (e.g. a second bot instance sharing the token) gets
+  // inherited forever and the bot silently stops receiving e.g. callback_query
+  // updates while messages still arrive. Asserting `[]` (empty = all update
+  // types) on each poll prevents that wedge.
+  bot.api.config.use((prev, method, payload, signal) => {
+    if (method === "getUpdates") {
+      return prev(method, { ...payload, allowed_updates: [] }, signal);
+    }
+
+    return prev(method, payload, signal);
   });
 
   // Heartbeat for diagnostics: verify the event loop is not blocked
@@ -1375,6 +1497,21 @@ export function createBot(): Bot<Context> {
   bot.command(BOT_COMMAND.SKILLS, skillsCommand);
   bot.command(BOT_COMMAND.MCPS, mcpsCommand);
   bot.command(BOT_COMMAND.MODELS, (ctx) => showModelSelectionMenu(ctx));
+  bot.command(BOT_COMMAND.COSTLIMIT, costLimitCommand);
+  bot.command(BOT_COMMAND.COMPACT, async (ctx) => {
+    logger.debug(`[Bot] /compact command received`);
+
+    try {
+      if (await blockMenuWhileInteractionActive(ctx, "context")) {
+        return;
+      }
+
+      await handleContextButtonPress(ctx);
+    } catch (err) {
+      logger.error("[Bot] Error handling compact command:", err);
+      await ctx.reply(t("error.context_button"));
+    }
+  });
 
   bot.on("message:text", unknownCommandMiddleware);
 
@@ -1648,8 +1785,14 @@ export function createBot(): Bot<Context> {
       await ctx.reply(t("bot.photo_downloading"));
       const downloadedFile = await downloadTelegramFile(ctx.api, largestPhoto.file_id);
 
-      // Convert to data URI (Telegram always converts photos to JPEG)
-      const dataUri = toDataUri(downloadedFile.buffer, "image/jpeg");
+      let dataUri: string;
+      try {
+        // Convert to data URI (Telegram always converts photos to JPEG)
+        const buffer = await fs.readFile(downloadedFile.localPath);
+        dataUri = toDataUri(buffer, "image/jpeg");
+      } finally {
+        await removeDownloadedFile(downloadedFile.localPath);
+      }
 
       // Create file part
       const filePart: FilePartInput = {
@@ -1659,7 +1802,7 @@ export function createBot(): Bot<Context> {
         url: dataUri,
       };
 
-      logger.info(`[Bot] Sending photo (${downloadedFile.buffer.length} bytes) with prompt`);
+      logger.info(`[Bot] Sending photo (${downloadedFile.fileSize} bytes) with prompt`);
 
       botInstance = bot;
       rememberScopeTarget(ctx);
@@ -1746,7 +1889,10 @@ export function createBot(): Bot<Context> {
       return;
     }
 
-    await processUserPrompt(ctx, text, promptDeps);
+    queueCoalescedPrompt(ctx, text, promptDeps, {
+      windowMs: config.bot.promptCoalesceMs,
+      minLength: config.bot.promptCoalesceMinLength,
+    });
 
     logger.debug("[Bot] message:text handler completed (prompt sent in background)");
   });
@@ -1764,6 +1910,8 @@ export function createBot(): Bot<Context> {
       );
     }
   });
+
+  restoreBoundSessionSubscriptions();
 
   return bot;
 }

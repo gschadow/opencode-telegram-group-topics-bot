@@ -57,6 +57,7 @@ const MARKDOWN_V2_RESERVED_CHARS = new Set([
 const MARKDOWN_V2_ESCAPED_CHAR = /\\([_\*\[\]\(\)~`>#+\-=|{}.!\\])/g;
 
 const MESSAGE_NOT_MODIFIED_MARKER = "message is not modified";
+const MESSAGE_TOO_LONG_MARKERS = ["message is too long", "too long"];
 
 export function escapeTelegramMarkdownV2(text: string): string {
   let result = "";
@@ -155,6 +156,15 @@ export function isTelegramMessageNotModifiedError(error: unknown): boolean {
   return errorText.includes(MESSAGE_NOT_MODIFIED_MARKER);
 }
 
+export function isTelegramMessageTooLongError(error: unknown): boolean {
+  const errorText = getErrorText(error);
+  if (!errorText) {
+    return false;
+  }
+
+  return MESSAGE_TOO_LONG_MARKERS.some((marker) => errorText.includes(marker));
+}
+
 export function getTelegramRetryAfterMs(error: unknown): number | null {
   if (!error || typeof error !== "object") {
     return null;
@@ -171,6 +181,35 @@ export function getTelegramRetryAfterMs(error: unknown): number | null {
   }
 
   return retryAfter * 1000;
+}
+
+/**
+ * Run a Telegram API call, retrying it when it is rejected with a 429 flood
+ * control error (`retry_after`). Telegram rate-limits edits of the same
+ * message hard, and an unretried 429 on the final-delivery path used to throw
+ * and (via an unhandled rejection) crash the bot. Retrying after the
+ * server-provided delay keeps the delivered content intact.
+ */
+export async function retryOnTelegramRateLimit<T>(
+  operation: () => Promise<T>,
+  onRetry?: (retryAfterMs: number, attempt: number) => void,
+): Promise<T> {
+  let attempt = 0;
+
+  while (true) {
+    try {
+      return await operation();
+    } catch (error) {
+      const retryAfterMs = getTelegramRetryAfterMs(error);
+      if (!retryAfterMs) {
+        throw error;
+      }
+
+      attempt += 1;
+      onRetry?.(retryAfterMs, attempt);
+      await new Promise((resolve) => setTimeout(resolve, retryAfterMs + 100));
+    }
+  }
 }
 
 export async function sendMessageWithMarkdownFallback({
@@ -198,6 +237,17 @@ export async function sendMessageWithMarkdownFallback({
   try {
     return await api.sendMessage(chatId, text, markdownOptions);
   } catch (error) {
+    if (isTelegramMessageTooLongError(error)) {
+      // Escaping inflated the text past Telegram's hard limit. The raw
+      // fallback is unescaped (shorter) and will fit — send it instead of
+      // rethrowing, so streaming content is never dropped.
+      logger.warn(
+        "[Bot] Markdown send exceeds Telegram length limit, sending in raw mode",
+        error,
+      );
+      return await api.sendMessage(chatId, fallbackText, stripMarkdownFormattingOptions(options));
+    }
+
     if (!isTelegramMarkdownParseError(error)) {
       throw error;
     }
@@ -261,6 +311,19 @@ export async function editMessageWithMarkdownFallback({
   try {
     return await api.editMessageText(chatId, messageId, text, markdownOptions);
   } catch (error) {
+    if (isTelegramMessageTooLongError(error)) {
+      logger.warn(
+        "[Bot] Markdown edit exceeds Telegram length limit, editing in raw mode",
+        error,
+      );
+      return await api.editMessageText(
+        chatId,
+        messageId,
+        fallbackText,
+        stripMarkdownFormattingOptions(options),
+      );
+    }
+
     if (!isTelegramMarkdownParseError(error)) {
       throw error;
     }

@@ -98,6 +98,7 @@ export const config = {
     token: getEnvVar("TELEGRAM_BOT_TOKEN"),
     allowedUserId: parseInt(getEnvVar("TELEGRAM_ALLOWED_USER_ID"), 10),
     proxyUrl: getEnvVar("TELEGRAM_PROXY_URL", false),
+    apiRoot: getEnvVar("TELEGRAM_API_ROOT", false) || "https://api.telegram.org",
   },
   opencode: {
     apiUrl: getEnvVar("OPENCODE_API_URL", false) || "http://localhost:4096",
@@ -115,6 +116,7 @@ export const config = {
     sessionsListLimit: getOptionalPositiveIntEnvVar("SESSIONS_LIST_LIMIT", 10),
     projectsListLimit: getOptionalPositiveIntEnvVar("PROJECTS_LIST_LIMIT", 10),
     commandsListLimit: getOptionalPositiveIntEnvVar("COMMANDS_LIST_LIMIT", 10),
+    modelsListLimit: getOptionalPositiveIntEnvVar("MODELS_LIST_LIMIT", 10),
     openBrowserRoots: getEnvVar("OPEN_BROWSER_ROOTS", false),
     responseStreamThrottleMs: getOptionalPositiveIntEnvVar("RESPONSE_STREAM_THROTTLE_MS", 1000),
     bashToolDisplayMaxLength: getOptionalPositiveIntEnvVar("BASH_TOOL_DISPLAY_MAX_LENGTH", 128),
@@ -135,6 +137,8 @@ export const config = {
     hideToolCallMessages: getOptionalBooleanEnvVar("HIDE_TOOL_CALL_MESSAGES", false),
     hideToolFileMessages: getOptionalBooleanEnvVar("HIDE_TOOL_FILE_MESSAGES", false),
     messageFormatMode: getOptionalMessageFormatModeEnvVar("MESSAGE_FORMAT_MODE", "markdown"),
+    promptCoalesceMs: getOptionalPositiveIntEnvVar("PROMPT_COALESCE_MS", 1000),
+    promptCoalesceMinLength: getOptionalPositiveIntEnvVar("PROMPT_COALESCE_MIN_LENGTH", 3500),
   },
   files: {
     maxFileSizeKb: parseInt(getEnvVar("CODE_FILE_MAX_SIZE_KB", false) || "100", 10),

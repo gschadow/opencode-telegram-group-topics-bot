@@ -14,12 +14,14 @@ export const es: I18nDictionary = {
   "cmd.description.tasklist": "Listar tareas programadas",
   "cmd.description.commands": "Comandos personalizados",
   "cmd.description.model": "Seleccionar modelo",
+  "cmd.description.costlimit": "Establecer límite de costo de sesión (USD)",
   "cmd.description.agent": "Seleccionar agente",
   "cmd.description.cleanup": "Cerrar temas obsoletos",
   "cmd.description.opencode_start": "Iniciar servidor OpenCode",
   "cmd.description.opencode_stop": "Detener servidor OpenCode",
   "cmd.description.help": "Ayuda",
   "cmd.description.open": "Añadir proyecto navegando directorios",
+  "cmd.description.compact": "Compactar el contexto de la sesión",
 
   "callback.unknown_command": "Comando desconocido",
   "callback.processing_error": "Error de procesamiento",
@@ -73,10 +75,6 @@ export const es: I18nDictionary = {
   "bot.session_created": "✅ Sesión creada: {title}",
   "bot.session_busy":
     "⏳ Tu solicitud anterior todavía está en ejecución, por eso esta nueva no se inició.\n\nPor qué pasó: OpenCode acepta solo una ejecución activa por sesión.\nQué hacer: espera la respuesta actual, o usa /abort si parece bloqueada, y luego envía el mensaje de nuevo.",
-  "bot.session_queued":
-    "📝 Tu mensaje quedó en cola para esta sesión.\n\nPosición en la cola: {position}\nQué pasará ahora: se iniciará automáticamente cuando termine la ejecución actual.",
-  "bot.session_queue_started":
-    "▶️ Se está iniciando el siguiente mensaje en cola para esta sesión.\n\nMensaje en cola:\n{preview}",
   "bot.session_reset_project_mismatch":
     "⚠️ La sesión activa no coincide con el proyecto seleccionado, así que se reinició. Usa /sessions para elegir una o /new para crear una nueva.",
   "bot.prompt_send_error":
@@ -112,6 +110,8 @@ export const es: I18nDictionary = {
   "status.line.uptime_sec": "Tiempo activo: {seconds} s",
   "status.line.mode": "Agente: {mode}",
   "status.line.model": "Modelo: {model}",
+  "status.line.cost": "Costo: ${cost}",
+  "status.line.tokens": "Tokens: {tokens}",
   "status.line.tts": "Respuestas TTS: {tts}",
   "status.line.session_id": "ID de sesión: {id}",
   "status.tts.on": "Activadas",
@@ -123,6 +123,10 @@ export const es: I18nDictionary = {
   "status.session_selected": "📋 Sesión actual: {title}",
   "status.session_not_selected": "📋 Sesión actual: no seleccionada",
   "status.session_hint": "Usa /sessions para elegir una o /new para crear una",
+  "costlimit.invalid": "Proporciona un límite en USD, p. ej. /costlimit 2.50",
+  "costlimit.no_session": "No hay sesión seleccionada. Usa /new o /sessions primero.",
+  "costlimit.set": "Límite de costo establecido en ${limit} USD para esta sesión.",
+  "costlimit.error": "🔴 No se pudo establecer el límite de costo.",
   "status.server_unavailable":
     "🔴 OpenCode Server no está disponible\n\nUsa /opencode_start para iniciar el servidor.",
 
@@ -327,6 +331,16 @@ export const es: I18nDictionary = {
   "model.menu.favorites_hint":
     "ℹ️ Agrega modelos a favoritos en OpenCode CLI para mantenerlos arriba de la lista.",
   "model.menu.error": "🔴 No se pudo obtener la lista de modelos",
+  "model.menu.browse": "📚 Todos los modelos:",
+  "model.menu.browse_empty": "No hay modelos en esta página",
+  "model.menu.page_indicator": "Página {current}/{total}",
+  "model.button.all_models": "📚 Todos los modelos",
+  "model.button.favorites": "⭐ Favoritos",
+  "model.button.prev_page": "⬅️ Anterior",
+  "model.button.next_page": "Siguiente ➡️",
+  "model.page_empty_callback": "No hay modelos en esta página",
+  "model.page_load_error_callback": "No se puede cargar esta página. Inténtalo de nuevo.",
+  "model.browse_error": "🔴 No se pudo cargar la lista de modelos",
 
   "variant.model_not_selected_callback": "Error: no hay un modelo seleccionado",
   "variant.changed_callback": "Variante cambiada: {name}",

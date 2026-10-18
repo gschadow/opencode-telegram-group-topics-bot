@@ -104,6 +104,7 @@ Current command set:
 - [x] `/projects` - show and switch projects
 - [x] `/open` - add and select a project by browsing allowed directories
 - [x] `/rename` - rename current session
+- [x] `/compact` - compact the current session context
 - [x] `/commands` - browse and run custom commands (plus built-ins like `init` and `review`)
 - [x] `/task` - create a scheduled task for the current project
 - [x] `/tasklist` - list and delete scheduled tasks for the current project
@@ -170,6 +171,7 @@ Open tasks for upcoming iterations:
 - [x] Add scheduled tasks
 - [ ] Provide a Docker image and basic container deployment guide
 - [x] Add voice transcription
+- [x] Prompt origin attribution (sender name + Telegram group/thread id prepended so the session knows who is speaking and can route replies back)
 
 ## Possible Improvements
 

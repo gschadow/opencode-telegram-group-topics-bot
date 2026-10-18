@@ -31,6 +31,7 @@ import { INTERACTION_CLEAR_REASON } from "../../interaction/constants.js";
 import { getTopicBindingByScopeKey } from "../../topic/manager.js";
 import { getScheduledTaskTopicByChatAndThread } from "../../scheduled-task/store.js";
 import { assistantRunState } from "../assistant-run-state.js";
+import { buildSenderOriginHeader } from "../utils/sender-origin.js";
 
 /** Module-level references for async callbacks that don't have ctx. */
 let botInstance: Bot<Context> | null = null;
@@ -62,23 +63,7 @@ type PromptErrorLogContext = {
   fileCount: number;
 };
 
-interface QueuedPromptRequest {
-  sessionId: string;
-  chatId: number;
-  threadId: number | null;
-  responseMode: PromptResponseMode;
-  promptOptions: PromptRequestOptions;
-  promptErrorLogContext: PromptErrorLogContext;
-  notifyOnQueue: boolean;
-}
-
-const queuedPromptRequests = new Map<string, QueuedPromptRequest[]>();
-const drainingQueuedSessions = new Set<string>();
 const activePromptResponseModes = new Map<string, PromptResponseMode>();
-
-// If OpenCode headless/server mode gains a native per-session queue later, prefer that
-// over this bot-side queue so Telegram matches the upstream client behavior more closely.
-const QUEUED_PROMPT_PREVIEW_MAX_LENGTH = 280;
 
 export function getPromptBotInstance(): Bot<Context> | null {
   return botInstance;
@@ -86,81 +71,6 @@ export function getPromptBotInstance(): Bot<Context> | null {
 
 export function getPromptChatId(): number | null {
   return chatIdInstance;
-}
-
-function getQueuedPromptCount(sessionId: string): number {
-  return queuedPromptRequests.get(sessionId)?.length ?? 0;
-}
-
-function enqueuePromptRequest(request: QueuedPromptRequest): number {
-  const queue = queuedPromptRequests.get(request.sessionId) ?? [];
-  queue.push(request);
-  queuedPromptRequests.set(request.sessionId, queue);
-  return queue.length;
-}
-
-function takeNextQueuedPromptRequest(sessionId: string): QueuedPromptRequest | null {
-  const queue = queuedPromptRequests.get(sessionId);
-  if (!queue || queue.length === 0) {
-    return null;
-  }
-
-  const nextRequest = queue.shift() ?? null;
-  if (queue.length === 0) {
-    queuedPromptRequests.delete(sessionId);
-  } else {
-    queuedPromptRequests.set(sessionId, queue);
-  }
-
-  return nextRequest;
-}
-
-async function sendQueuedPromptNotice(
-  bot: Bot<Context>,
-  chatId: number,
-  threadId: number | null,
-  position: number,
-): Promise<void> {
-  await bot.api
-    .sendMessage(chatId, t("bot.session_queued", { position: String(position) }), {
-      ...getThreadSendOptions(threadId),
-    })
-    .catch(() => {});
-}
-
-function truncateQueuedPromptPreview(text: string): string {
-  if (text.length <= QUEUED_PROMPT_PREVIEW_MAX_LENGTH) {
-    return text;
-  }
-
-  return `${text.slice(0, QUEUED_PROMPT_PREVIEW_MAX_LENGTH - 3).trimEnd()}...`;
-}
-
-function getQueuedPromptPreview(request: QueuedPromptRequest): string {
-  const textParts = request.promptOptions.parts
-    .filter((part): part is TextPartInput => part.type === "text")
-    .map((part) => part.text.trim())
-    .filter((text) => text.length > 0);
-
-  const firstText = textParts[0] ?? "See attached file";
-  return truncateQueuedPromptPreview(firstText);
-}
-
-async function sendQueuedPromptStartedNotice(
-  bot: Bot<Context>,
-  request: QueuedPromptRequest,
-): Promise<void> {
-  await bot.api
-    .sendMessage(
-      request.chatId,
-      t("bot.session_queue_started", {
-        preview: getQueuedPromptPreview(request),
-      }),
-      {
-        ...getThreadSendOptions(request.threadId),
-      },
-    )
-    .catch(() => {});
 }
 
 function buildPromptRequest(
@@ -242,161 +152,77 @@ export function consumePromptResponseMode(sessionId: string): PromptResponseMode
   return responseMode;
 }
 
-function submitPromptRequest(bot: Bot<Context>, request: QueuedPromptRequest): void {
-  setActivePromptResponseMode(request.sessionId, request.responseMode);
-  assistantRunState.startRun(request.sessionId, {
+function submitPromptRequest(
+  bot: Bot<Context>,
+  sessionId: string,
+  chatId: number,
+  threadId: number | null,
+  responseMode: PromptResponseMode,
+  promptOptions: PromptRequestOptions,
+  promptErrorLogContext: PromptErrorLogContext,
+): void {
+  setActivePromptResponseMode(sessionId, responseMode);
+  assistantRunState.startRun(sessionId, {
     startedAt: Date.now(),
-    configuredAgent: request.promptOptions.agent,
-    configuredProviderID: request.promptOptions.model?.providerID,
-    configuredModelID: request.promptOptions.model?.modelID,
+    configuredAgent: promptOptions.agent,
+    configuredProviderID: promptOptions.model?.providerID,
+    configuredModelID: promptOptions.model?.modelID,
   });
 
   logger.info(
-    `[Bot] Calling session.promptAsync (fire-and-forget) with agent=${request.promptOptions.agent}, fileCount=${request.promptErrorLogContext.fileCount}...`,
+    `[Bot] Calling session.promptAsync (fire-and-forget) with agent=${promptOptions.agent}, fileCount=${promptErrorLogContext.fileCount}...`,
   );
 
   safeBackgroundTask({
     taskName: "session.promptAsync",
-    task: () => opencodeClient.session.promptAsync(request.promptOptions),
+    task: () => opencodeClient.session.promptAsync(promptOptions),
     onSuccess: ({ error }) => {
-      if (error) {
-        const details = formatErrorDetails(error, 6000);
-        const errorType = classifyPromptSubmitError(error);
-        logger.error(
-          "[Bot] OpenCode API returned an error for session.promptAsync",
-          request.promptErrorLogContext,
-        );
-        logger.error("[Bot] session.promptAsync error details:", details);
-        logger.error("[Bot] session.promptAsync raw API error object:", error);
-
-        if (errorType === "busy") {
-          assistantRunState.clearRun(request.sessionId, "prompt_busy_requeued");
-          const position = enqueuePromptRequest({
-            ...request,
-            notifyOnQueue: false,
-          });
-          if (request.notifyOnQueue) {
-            void sendQueuedPromptNotice(bot, request.chatId, request.threadId, position);
-          }
-          return;
-        }
-
-        const errorMessageKey =
-          errorType === "session_not_found"
-            ? "bot.prompt_send_error_session_not_found"
-            : "bot.prompt_send_error";
-
-        assistantRunState.clearRun(request.sessionId, "prompt_submit_error");
-
-        void bot.api
-          .sendMessage(request.chatId, t(errorMessageKey), {
-            ...getThreadSendOptions(request.threadId),
-          })
-          .catch(() => {});
+      if (!error) {
+        logger.info("[Bot] session.promptAsync accepted");
         return;
       }
 
-      logger.info("[Bot] session.promptAsync accepted");
-    },
-    onError: (error) => {
       const details = formatErrorDetails(error, 6000);
       const errorType = classifyPromptSubmitError(error);
-      logger.error(
-        "[Bot] session.promptAsync background task failed",
-        request.promptErrorLogContext,
-      );
-      logger.error("[Bot] session.promptAsync background failure details:", details);
-      logger.error("[Bot] session.promptAsync raw background error object:", error);
-
-      if (errorType === "busy") {
-        clearPromptResponseMode(request.sessionId);
-        assistantRunState.clearRun(request.sessionId, "prompt_busy_background_requeued");
-        const position = enqueuePromptRequest({
-          ...request,
-          notifyOnQueue: false,
-        });
-        if (request.notifyOnQueue) {
-          void sendQueuedPromptNotice(bot, request.chatId, request.threadId, position);
-        }
-        return;
-      }
+      logger.error("[Bot] OpenCode API returned an error for session.promptAsync", promptErrorLogContext);
+      logger.error("[Bot] session.promptAsync error details:", details);
+      logger.error("[Bot] session.promptAsync raw API error object:", error);
 
       const errorMessageKey =
         errorType === "session_not_found"
           ? "bot.prompt_send_error_session_not_found"
           : "bot.prompt_send_error";
 
-      clearPromptResponseMode(request.sessionId);
-      assistantRunState.clearRun(request.sessionId, "prompt_submit_background_error");
+      assistantRunState.clearRun(sessionId, "prompt_submit_error");
 
       void bot.api
-        .sendMessage(request.chatId, t(errorMessageKey), {
-          ...getThreadSendOptions(request.threadId),
+        .sendMessage(chatId, t(errorMessageKey), {
+          ...getThreadSendOptions(threadId),
+        })
+        .catch(() => {});
+    },
+    onError: (error) => {
+      const details = formatErrorDetails(error, 6000);
+      const errorType = classifyPromptSubmitError(error);
+      logger.error("[Bot] session.promptAsync background task failed", promptErrorLogContext);
+      logger.error("[Bot] session.promptAsync background failure details:", details);
+      logger.error("[Bot] session.promptAsync raw background error object:", error);
+
+      const errorMessageKey =
+        errorType === "session_not_found"
+          ? "bot.prompt_send_error_session_not_found"
+          : "bot.prompt_send_error";
+
+      clearPromptResponseMode(sessionId);
+      assistantRunState.clearRun(sessionId, "prompt_submit_background_error");
+
+      void bot.api
+        .sendMessage(chatId, t(errorMessageKey), {
+          ...getThreadSendOptions(threadId),
         })
         .catch(() => {});
     },
   });
-}
-
-export async function dispatchNextQueuedPrompt(sessionId: string): Promise<boolean> {
-  if (
-    !botInstance ||
-    drainingQueuedSessions.has(sessionId) ||
-    getQueuedPromptCount(sessionId) === 0
-  ) {
-    return false;
-  }
-
-  const nextRequest = takeNextQueuedPromptRequest(sessionId);
-  if (!nextRequest) {
-    return false;
-  }
-
-  drainingQueuedSessions.add(sessionId);
-  try {
-    const sessionBusy = await isSessionBusy(sessionId, nextRequest.promptOptions.directory);
-    if (sessionBusy) {
-      enqueuePromptRequest(nextRequest);
-      return false;
-    }
-
-    await sendQueuedPromptStartedNotice(botInstance, nextRequest);
-    submitPromptRequest(botInstance, {
-      ...nextRequest,
-      notifyOnQueue: false,
-    });
-    return true;
-  } finally {
-    drainingQueuedSessions.delete(sessionId);
-  }
-}
-
-export function __resetQueuedPromptsForTests(): void {
-  queuedPromptRequests.clear();
-  drainingQueuedSessions.clear();
-  activePromptResponseModes.clear();
-}
-
-async function isSessionBusy(sessionId: string, directory: string): Promise<boolean> {
-  try {
-    const { data, error } = await opencodeClient.session.status({ directory });
-
-    if (error || !data) {
-      logger.warn("[Bot] Failed to check session status before prompt:", error);
-      return false;
-    }
-
-    const sessionStatus = (data as Record<string, { type?: string }>)[sessionId];
-    if (!sessionStatus) {
-      return false;
-    }
-
-    logger.debug(`[Bot] Current session status before prompt: ${sessionStatus.type || "unknown"}`);
-    return sessionStatus.type === "busy";
-  } catch (err) {
-    logger.warn("[Bot] Error checking session status before prompt:", err);
-    return false;
-  }
 }
 
 async function projectDirectoryExists(directory: string): Promise<boolean> {
@@ -577,34 +403,6 @@ export async function processUserPrompt(
 
   summaryAggregator.setSession(currentSession.id);
 
-  const sessionIsBusy = await isSessionBusy(currentSession.id, currentSession.directory);
-  if (sessionIsBusy) {
-    const currentAgent = await resolveProjectAgent(getStoredAgent(scopeKey), scopeKey);
-    const storedModel = getStoredModel(scopeKey);
-    const queuedRequest = buildPromptRequest(
-      currentSession,
-      currentAgent,
-      storedModel,
-      text,
-      fileParts,
-    );
-    const position = enqueuePromptRequest({
-      sessionId: currentSession.id,
-      chatId: ctx.chat!.id,
-      threadId: scope?.threadId ?? null,
-      responseMode,
-      promptOptions: queuedRequest.promptOptions,
-      promptErrorLogContext: queuedRequest.promptErrorLogContext,
-      notifyOnQueue: true,
-    });
-
-    logger.info(
-      `[Bot] Queued prompt for busy session ${currentSession.id} at position ${position}`,
-    );
-    await ctx.reply(t("bot.session_queued", { position: String(position) }));
-    return true;
-  }
-
   try {
     const currentAgent = await resolveProjectAgent(getStoredAgent(scopeKey), scopeKey);
     const storedModel = getStoredModel(scopeKey);
@@ -612,16 +410,24 @@ export async function processUserPrompt(
       await prepareSessionForPrompt(currentSession.id);
     }
 
-    const request = buildPromptRequest(currentSession, currentAgent, storedModel, text, fileParts);
-    submitPromptRequest(bot, {
-      sessionId: currentSession.id,
-      chatId: ctx.chat!.id,
-      threadId: scope?.threadId ?? null,
+    const originHeader = buildSenderOriginHeader(ctx);
+    const textWithOrigin = originHeader ? `${originHeader}\n\n${text}` : text;
+    const request = buildPromptRequest(
+      currentSession,
+      currentAgent,
+      storedModel,
+      textWithOrigin,
+      fileParts,
+    );
+    submitPromptRequest(
+      bot,
+      currentSession.id,
+      ctx.chat!.id,
+      scope?.threadId ?? null,
       responseMode,
-      promptOptions: request.promptOptions,
-      promptErrorLogContext: request.promptErrorLogContext,
-      notifyOnQueue: true,
-    });
+      request.promptOptions,
+      request.promptErrorLogContext,
+    );
 
     return true;
   } catch (err) {

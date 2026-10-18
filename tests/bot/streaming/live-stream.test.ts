@@ -26,10 +26,10 @@ describe("bot/streaming/live-stream", () => {
     expect(editText).not.toHaveBeenCalled();
   });
 
-  it("keeps the thinking line and appends assistant text below it", async () => {
+  it("seals thinking into its own message and starts assistant text fresh", async () => {
     vi.useFakeTimers();
 
-    const sendText = vi.fn().mockResolvedValue(102);
+    const sendText = vi.fn().mockResolvedValueOnce(102).mockResolvedValueOnce(103);
     const editText = vi.fn().mockResolvedValue(undefined);
     const stream = new LiveStream({ sendText, editText, throttleMs: 50 });
 
@@ -38,7 +38,12 @@ describe("bot/streaming/live-stream", () => {
     await stream.updateAssistant("s1", "m1", "Assistant start");
     await vi.advanceTimersByTimeAsync(50);
 
-    expect(editText).toHaveBeenCalledWith("s1", 102, "> Thinking\n\nAssistant start", "markdown_v2", false);
+    // The thinking block must be sealed into its own message and the final
+    // response must start a fresh, separate message (never appended onto the
+    // thinking message).
+    expect(sendText).toHaveBeenNthCalledWith(1, "s1", "💭 Thinking", "markdown_v2", false);
+    expect(sendText).toHaveBeenNthCalledWith(2, "s1", "Assistant start", "markdown_v2", false);
+    expect(editText).not.toHaveBeenCalled();
   });
 
   it("starts a new streamed message after a file boundary seal", async () => {
@@ -185,18 +190,73 @@ describe("bot/streaming/live-stream", () => {
     expect(editText).not.toHaveBeenCalled();
   });
 
-  it("truncates oversized replaceable service updates so they remain replaceable", async () => {
+  it("does not re-send archived thinking prefix when thinking grows past the Telegram limit", async () => {
+    vi.useFakeTimers();
+
+    const sendText = vi.fn().mockResolvedValue(200);
+    const editText = vi.fn().mockResolvedValue(undefined);
+    const stream = new LiveStream({ sendText, editText, throttleMs: 50 });
+
+    // One giant thinking line that already exceeds one Telegram message.
+    const bigThinking = "x".repeat(4200);
+    await stream.showThinking("s1", bigThinking);
+    await vi.advanceTimersByTimeAsync(50);
+
+    // Extend the thinking further. The extension must only carry the delta —
+    // it must be applied via edit on the growing message, never re-sent as a
+    // fresh message that re-includes the already-archived prefix.
+    await stream.showThinking("s1", `${bigThinking} yyy`);
+    await vi.advanceTimersByTimeAsync(50);
+
+    const sentTexts = sendText.mock.calls.map((call) => call[1]);
+    // First send: the 4096-char prefix. Second send: the 107-char tail that
+    // could not fit. The " yyy" extension must NOT produce a third send.
+    expect(sendText).toHaveBeenCalledTimes(2);
+    expect(sentTexts[0].length).toBe(4096);
+    // The extension lands as an edit appending the delta to the tail message.
+    expect(editText).toHaveBeenCalled();
+    const lastEditText = editText.mock.calls.at(-1)![2] as string;
+    expect(lastEditText).toContain(" yyy");
+    expect(lastEditText.length).toBeLessThanOrEqual(4096);
+  });
+
+  it("splits oversized replaceable service updates at the Telegram limit without truncating content", async () => {
     vi.useFakeTimers();
 
     const sendText = vi.fn().mockResolvedValue(51);
     const editText = vi.fn().mockResolvedValue(undefined);
     const stream = new LiveStream({ sendText, editText, throttleMs: 50 });
 
-    stream.replaceServiceByPrefix("s1", "🧩", `🧩 ${"x".repeat(5000)}`);
+    const payload = `🧩 ${"x".repeat(5000)}`;
+    stream.replaceServiceByPrefix("s1", "🧩", payload);
     await vi.advanceTimersByTimeAsync(50);
 
-    expect(sendText).toHaveBeenCalledTimes(1);
-    expect(sendText.mock.calls[0][1].length).toBeLessThanOrEqual(3503);
+    const sentTexts = sendText.mock.calls.map((call) => call[1]);
+    expect(sentTexts.length).toBeGreaterThan(1);
+    expect(sentTexts.every((text) => text.length <= 4096)).toBe(true);
+    expect(sentTexts.join("")).toBe(payload);
+    expect(sentTexts.join("")).not.toContain("...");
+  });
+
+  it("splits oversized streams at the converted MarkdownV2 length, not the raw length", async () => {
+    vi.useFakeTimers();
+
+    const sendText = vi.fn().mockResolvedValue(71);
+    const editText = vi.fn().mockResolvedValue(undefined);
+    const stream = new LiveStream({ sendText, editText, throttleMs: 50 });
+
+    // Raw text is ~2900 chars (under the 4096 raw limit) but MarkdownV2
+    // escaping inflates it to ~5300 converted chars, which Telegram rejects.
+    const longText = `${"|".repeat(2400)}\n\n${"B".repeat(500)}`;
+    await stream.updateAssistant("s1", "m1", longText);
+    await vi.advanceTimersByTimeAsync(50);
+
+    const sentTexts = sendText.mock.calls.map((call) => call[1]);
+    expect(sentTexts.length).toBeGreaterThan(1);
+    expect(sentTexts.every((text) => text.length <= 4096)).toBe(true);
+
+    const restored = sentTexts.join("").replace(/\\([_*[\]()~`>#+\-=|{}.!\\])/g, "$1");
+    expect(restored.replace(/\s/g, "")).toBe(longText.replace(/\s/g, ""));
   });
 
   it("replaces prior replace-keyed service updates instead of accumulating them", async () => {
@@ -274,10 +334,10 @@ describe("bot/streaming/live-stream", () => {
     expect(editText).toHaveBeenLastCalledWith("s1", 62, "BCCCC", "markdown_v2", false);
   });
 
-  it("removes duplicate assistant text after final delivery while keeping service history", async () => {
+  it("seals thinking into its own message and deletes the transient assistant message during final cleanup", async () => {
     vi.useFakeTimers();
 
-    const sendText = vi.fn().mockResolvedValue(71);
+    const sendText = vi.fn().mockResolvedValueOnce(71).mockResolvedValueOnce(72);
     const editText = vi.fn().mockResolvedValue(undefined);
     const deleteText = vi.fn().mockResolvedValue(undefined);
     const stream = new LiveStream({ sendText, editText, deleteText, throttleMs: 50 });
@@ -288,8 +348,11 @@ describe("bot/streaming/live-stream", () => {
 
     await stream.cleanupAfterFinalDelivery("s1");
 
-    expect(editText).toHaveBeenLastCalledWith("s1", 71, "> Thinking", "markdown_v2", false);
-    expect(deleteText).not.toHaveBeenCalled();
+    expect(sendText).toHaveBeenNthCalledWith(1, "s1", "💭 Thinking", "markdown_v2", false);
+    expect(sendText).toHaveBeenNthCalledWith(2, "s1", "Final answer", "markdown_v2", false);
+    // The transient assistant-only message is deleted; the thinking message stays.
+    expect(deleteText).toHaveBeenCalledWith("s1", 72);
+    expect(editText).not.toHaveBeenCalled();
   });
 
   it("deletes the transient stream message when it only contained assistant text", async () => {
@@ -395,5 +458,39 @@ describe("bot/streaming/live-stream", () => {
       true,
       longText,
     );
+  });
+
+  it("does not leak an unhandled rejection when a queued task fails", async () => {
+    vi.useFakeTimers();
+
+    const sendText = vi.fn().mockResolvedValue(101);
+    const editText = vi.fn().mockResolvedValue(undefined);
+    const editRenderedPart = vi.fn().mockRejectedValue(new Error("boom"));
+    const stream = new LiveStream({ sendText, editText, editRenderedPart, throttleMs: 50 });
+
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+
+    try {
+      await stream.updateAssistant("s1", "m1", "Final answer");
+      await vi.advanceTimersByTimeAsync(50);
+
+      await expect(
+        stream.finalizeCurrentMessage("s1", {
+          format: "markdown_v2",
+          includeKeyboard: false,
+          renderedPart: { text: "Final answer", fallbackText: "Final answer", source: "plain" },
+        }),
+      ).rejects.toThrow("boom");
+
+      // Let any derived microtask rejections surface.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(unhandled).toHaveLength(0);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
   });
 });

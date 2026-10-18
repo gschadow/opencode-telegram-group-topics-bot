@@ -1,11 +1,14 @@
+import fs from "node:fs/promises";
 import type { Context } from "grammy";
 import { config } from "../../config.js";
 import { processUserPrompt, type ProcessPromptDeps } from "./prompt.js";
 import {
   downloadTelegramFile,
+  removeDownloadedFile,
   toDataUri,
   isTextMimeType,
   isFileSizeAllowed,
+  type DownloadedFile,
 } from "../utils/file-download.js";
 import { getModelCapabilities, supportsInput } from "../../model/capabilities.js";
 import { getStoredModel } from "../../model/manager.js";
@@ -17,7 +20,7 @@ export interface DocumentHandlerDeps extends ProcessPromptDeps {
   downloadFile?: (
     api: Context["api"],
     fileId: string,
-  ) => Promise<{ buffer: Buffer; filePath: string }>;
+  ) => Promise<DownloadedFile>;
   getModelCapabilities?: (
     providerId: string,
     modelId: string,
@@ -64,15 +67,19 @@ export async function handleDocumentMessage(
       await ctx.reply(t("bot.file_downloading"));
       const downloadedFile = await downloadFile(ctx.api, doc.file_id);
 
-      const textContent = downloadedFile.buffer.toString("utf-8");
+      try {
+        const textContent = await fs.readFile(downloadedFile.localPath, "utf-8");
 
-      const promptWithFile = `--- Content of ${filename} ---\n${textContent}\n--- End of file ---\n\n${caption}`;
+        const promptWithFile = `--- Content of ${filename} ---\n${textContent}\n--- End of file ---\n\n${caption}`;
 
-      logger.info(
-        `[Document] Sending text file (${downloadedFile.buffer.length} bytes, ${filename}) as prompt`,
-      );
+        logger.info(
+          `[Document] Sending text file (${downloadedFile.fileSize} bytes, ${filename}) as prompt`,
+        );
 
-      await processPrompt(ctx, promptWithFile, deps);
+        await processPrompt(ctx, promptWithFile, deps);
+      } finally {
+        await removeDownloadedFile(downloadedFile.localPath);
+      }
       return;
     }
 
@@ -95,20 +102,25 @@ export async function handleDocumentMessage(
       await ctx.reply(t("bot.file_downloading"));
       const downloadedFile = await downloadFile(ctx.api, doc.file_id);
 
-      const dataUri = toDataUri(downloadedFile.buffer, mimeType);
+      try {
+        const buffer = await fs.readFile(downloadedFile.localPath);
+        const dataUri = toDataUri(buffer, mimeType);
 
-      const filePart: FilePartInput = {
-        type: "file",
-        mime: mimeType,
-        filename: filename,
-        url: dataUri,
-      };
+        const filePart: FilePartInput = {
+          type: "file",
+          mime: mimeType,
+          filename: filename,
+          url: dataUri,
+        };
 
-      logger.info(
-        `[Document] Sending PDF (${downloadedFile.buffer.length} bytes, ${filename}) with prompt`,
-      );
+        logger.info(
+          `[Document] Sending PDF (${downloadedFile.fileSize} bytes, ${filename}) with prompt`,
+        );
 
-      await processPrompt(ctx, caption, deps, [filePart]);
+        await processPrompt(ctx, caption, deps, [filePart]);
+      } finally {
+        await removeDownloadedFile(downloadedFile.localPath);
+      }
       return;
     }
 

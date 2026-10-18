@@ -13,10 +13,12 @@ export const BOT_COMMAND = {
   TASK: "task",
   TASKLIST: "tasklist",
   RENAME: "rename",
+  COMPACT: "compact",
   COMMANDS: "commands",
   SKILLS: "skills",
   MCPS: "mcps",
   MODELS: "models",
+  COSTLIMIT: "costlimit",
   OPENCODE_START: "opencode_start",
   OPENCODE_STOP: "opencode_stop",
 } as const;

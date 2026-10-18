@@ -16,6 +16,42 @@ import { logger } from "../utils/logger.js";
 
 const SHUTDOWN_TIMEOUT_MS = 5000;
 
+// Startup network resilience. On boot the machine may come up before DNS/network
+// is actually usable, so the first Telegram calls can hang (fetch with no timeout)
+// or fail. Without this the CLI promise rejects/hangs while the event loop stays
+// alive on its intervals/SSE handles, leaving a zombie process that never polls
+// Telegram and never triggers systemd's Restart=on-failure. Retry forever with a
+// per-attempt timeout and capped exponential backoff instead.
+const STARTUP_CALL_TIMEOUT_MS = 20_000;
+const STARTUP_RETRY_BASE_MS = 2_000;
+const STARTUP_RETRY_MAX_MS = 60_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function startupRetryDelayMs(attempt: number): number {
+  return Math.min(STARTUP_RETRY_MAX_MS, STARTUP_RETRY_BASE_MS * 2 ** Math.min(attempt - 1, 5));
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+}
+
+// Guard a startup network call that could otherwise hang indefinitely when the
+// connection is blackholed (the original boot failure mode).
+function withStartupTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${label} timed out after ${STARTUP_CALL_TIMEOUT_MS}ms`)),
+      STARTUP_CALL_TIMEOUT_MS,
+    );
+  });
+
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 async function getBotVersion(): Promise<string> {
   try {
     const packageJsonPath = new URL("../../package.json", import.meta.url);
@@ -109,19 +145,61 @@ export async function startBotApp(): Promise<void> {
   process.on("SIGINT", handleSigint);
   process.on("SIGTERM", handleSigterm);
 
-  const webhookInfo = await bot.api.getWebhookInfo();
+  const retryOneShot = async <T>(label: string, run: () => Promise<T>): Promise<T> => {
+    let attempt = 0;
+    for (;;) {
+      try {
+        return await run();
+      } catch (error) {
+        if (shutdownStarted) {
+          throw error;
+        }
+
+        attempt += 1;
+        const delayMs = startupRetryDelayMs(attempt);
+        logger.warn(
+          `[App] ${label} failed (attempt ${attempt}): ${describeError(error)}. Retrying in ${delayMs}ms`,
+        );
+        await sleep(delayMs);
+      }
+    }
+  };
+
+  const webhookInfo = await retryOneShot("getWebhookInfo", () =>
+    withStartupTimeout(bot.api.getWebhookInfo(), "getWebhookInfo"),
+  );
   if (webhookInfo.url) {
     logger.info(`[Bot] Webhook detected: ${webhookInfo.url}, removing...`);
-    await bot.api.deleteWebhook();
+    await retryOneShot("deleteWebhook", () =>
+      withStartupTimeout(bot.api.deleteWebhook(), "deleteWebhook"),
+    );
     logger.info("[Bot] Webhook removed, switching to long polling");
   }
 
   try {
-    await bot.start({
-      onStart: (botInfo) => {
-        logger.info(`Bot @${botInfo.username} started!`);
-      },
-    });
+    let startAttempt = 0;
+    for (;;) {
+      try {
+        await bot.start({
+          onStart: (botInfo) => {
+            startAttempt = 0;
+            logger.info(`Bot @${botInfo.username} started!`);
+          },
+        });
+        break;
+      } catch (error) {
+        if (shutdownStarted) {
+          break;
+        }
+
+        startAttempt += 1;
+        const delayMs = startupRetryDelayMs(startAttempt);
+        logger.warn(
+          `[App] Telegram long-polling start failed (attempt ${startAttempt}): ${describeError(error)}. Retrying in ${delayMs}ms`,
+        );
+        await sleep(delayMs);
+      }
+    }
   } finally {
     process.off("SIGINT", handleSigint);
     process.off("SIGTERM", handleSigterm);

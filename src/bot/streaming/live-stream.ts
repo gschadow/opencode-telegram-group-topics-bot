@@ -16,10 +16,17 @@ function renderAndConvertEntries(entries: StreamEntry[]): string {
   }
 }
 
+function convertedLength(text: string): number {
+  try {
+    return convertToTelegramMarkdownV2(text).length;
+  } catch {
+    return text.length;
+  }
+}
+
 const DEFAULT_THROTTLE_MS = 1000;
 const TELEGRAM_MESSAGE_LIMIT = 4096;
 const THINKING_PREFIX = "__thinking__";
-const MAX_REPLACEABLE_SERVICE_LENGTH = 3500;
 
 interface LiveStreamOptions {
   sendText: (
@@ -72,6 +79,7 @@ interface AssistantState {
 
 interface ServiceState {
   thinkingText: string | null;
+  thinkingCommittedLength: number;
   updates: string[];
 }
 
@@ -92,7 +100,7 @@ function renderEntries(entries: StreamEntry[]): string {
 }
 
 function splitLongText(text: string, limit: number): [string, string] {
-  if (text.length <= limit) {
+  if (text.length <= limit && convertedLength(text) <= limit) {
     return [text, ""];
   }
 
@@ -101,8 +109,43 @@ function splitLongText(text: string, limit: number): [string, string] {
     splitIndex = limit;
   }
 
-  const prefix = text.slice(0, splitIndex).trimEnd();
-  const suffix = text.slice(splitIndex).replace(/^\n+/, "").trimStart();
+  let prefix = text.slice(0, splitIndex).trimEnd();
+  let suffix = text.slice(splitIndex).replace(/^\n+/, "").trimStart();
+
+  // MarkdownV2 escaping inflates the converted length well past the raw length.
+  // Telegram hard-rejects messages over its limit, and the flush drops content
+  // on send failure — so walk back to an earlier newline until the CONVERTED
+  // prefix actually fits, guaranteeing the rolled message is accepted.
+  let guard = 0;
+  while (convertedLength(prefix) > limit && guard < 128) {
+    const previousNewline = prefix.lastIndexOf("\n");
+    if (previousNewline <= 0) {
+      break;
+    }
+    splitIndex = previousNewline;
+    prefix = text.slice(0, splitIndex).trimEnd();
+    suffix = text.slice(splitIndex).replace(/^\n+/, "").trimStart();
+    guard++;
+  }
+
+  if (convertedLength(prefix) > limit) {
+    // No newline boundary fits (long unbroken run of escaped characters).
+    // Binary-search the raw cut whose converted form stays under the limit.
+    let low = 0;
+    let high = Math.min(limit, text.length - 1);
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      if (convertedLength(text.slice(0, mid)) <= limit) {
+        low = mid;
+      } else {
+        high = mid - 1;
+      }
+    }
+    splitIndex = low;
+    prefix = text.slice(0, splitIndex).trimEnd();
+    suffix = text.slice(splitIndex).replace(/^\n+/, "").trimStart();
+  }
+
   return [prefix, suffix];
 }
 
@@ -189,7 +232,7 @@ function splitEntriesForLimit(entries: StreamEntry[]): {
 
   for (let index = 0; index < entries.length; index++) {
     const entry = entries[index];
-    const candidateText = renderEntries([...sentEntries, entry]);
+    const candidateText = renderAndConvertEntries([...sentEntries, entry]);
     if (candidateText.length <= TELEGRAM_MESSAGE_LIMIT) {
       sentEntries.push(entry);
       continue;
@@ -290,7 +333,15 @@ export class LiveStream {
     }
 
     this.applyMutation(sessionId, (state) => {
-      state.service.thinkingText = text.trim();
+      const previous = state.service.thinkingText;
+      const next = text.trim();
+      // A fresh thinking phase (not a continuation of the current one) must
+      // start from a clean commit point, otherwise the delta slice would be
+      // stale and could suppress or re-send thinking.
+      if (previous === null || !next.startsWith(previous)) {
+        state.service.thinkingCommittedLength = 0;
+      }
+      state.service.thinkingText = next;
       this.syncThinkingEntry(state);
     });
   }
@@ -329,11 +380,6 @@ export class LiveStream {
         (entry) => entry.kind === "service" && entry.replaceKey === normalizedPrefix,
       );
 
-      const truncatedText =
-        normalizedText.length > MAX_REPLACEABLE_SERVICE_LENGTH
-          ? `${normalizedText.slice(0, MAX_REPLACEABLE_SERVICE_LENGTH - 3)}...`
-          : normalizedText;
-
       if (!normalizedText) {
         if (existingIndex >= 0) {
           state.entries.splice(existingIndex, 1);
@@ -341,10 +387,10 @@ export class LiveStream {
         return;
       }
 
-      state.service.updates.push(truncatedText);
+      state.service.updates.push(normalizedText);
       const nextEntry: ServiceEntry = {
         kind: "service",
-        text: truncatedText,
+        text: normalizedText,
         replaceKey: normalizedPrefix,
       };
 
@@ -392,7 +438,7 @@ export class LiveStream {
     state.messageId = null;
     state.lastSentText = "";
     state.entries = [];
-    state.service = { thinkingText: null, updates: [] };
+    state.service = { thinkingText: null, thinkingCommittedLength: 0, updates: [] };
 
     if (resetAssistantState) {
       state.assistant = {
@@ -440,7 +486,15 @@ export class LiveStream {
       return;
     }
 
-    const hasServiceEntry = state.service.updates.length > 0;
+    // Break when there are tool/service updates OR a thinking block — the
+    // assistant's final text must always start a fresh message, never be
+    // appended onto an oversized thinking/rolled message (which would get
+    // archived and deleted during final cleanup).
+    const hasServiceEntry =
+      state.service.updates.length > 0 ||
+      state.entries.some(
+        (entry) => entry.kind === "service" && entry.replaceKey === THINKING_PREFIX,
+      );
     const hasAssistantEntry = state.entries.some((entry) => entry.kind === "assistant");
     if (!hasServiceEntry || hasAssistantEntry) {
       return;
@@ -520,7 +574,7 @@ export class LiveStream {
       latestState.messageId = null;
       latestState.lastSentText = "";
       latestState.entries = [];
-      latestState.service = { thinkingText: null, updates: [] };
+      latestState.service = { thinkingText: null, thinkingCommittedLength: 0, updates: [] };
       latestState.assistant = {
         messageId: null,
         fullText: "",
@@ -630,6 +684,7 @@ export class LiveStream {
       },
       service: {
         thinkingText: null,
+        thinkingCommittedLength: 0,
         updates: [],
       },
     };
@@ -705,21 +760,30 @@ export class LiveStream {
   }
 
   private syncThinkingEntry(state: SessionState): void {
-    const thinkingText = buildThinkingMessage(state.service.thinkingText, []);
+    const fullRendered = buildThinkingMessage(state.service.thinkingText, []);
     const existingIndex = state.entries.findIndex(
       (entry) => entry.kind === "service" && entry.replaceKey === THINKING_PREFIX,
     );
 
-    if (!thinkingText) {
+    if (!fullRendered) {
       if (existingIndex >= 0) {
         state.entries.splice(existingIndex, 1);
       }
       return;
     }
 
+    // Only render the uncommitted tail. Thinking is a growing message: the
+    // committed prefix is archived in earlier rolled messages and must not be
+    // re-sent on every update (which caused duplicated thinking blocks).
+    const committed = Math.min(state.service.thinkingCommittedLength, fullRendered.length);
+    const visible = fullRendered.slice(committed).trimStart();
+    if (!visible) {
+      return;
+    }
+
     const nextEntry: ServiceEntry = {
       kind: "service",
-      text: thinkingText,
+      text: visible,
       replaceKey: THINKING_PREFIX,
     };
 
@@ -782,9 +846,16 @@ export class LiveStream {
         }
       });
 
+    // The tracked promise must never reject: task failures are surfaced via the
+    // returned `nextTask` (which callers await), while this stored variant only
+    // exists for serialization. `nextTask.then(...)` on a rejected task would
+    // otherwise create an unawaited rejected promise -> unhandled rejection.
     this.sessionTasks.set(
       sessionId,
-      nextTask.then(() => undefined),
+      nextTask.then(
+        () => undefined,
+        () => undefined,
+      ),
     );
     return nextTask;
   }
@@ -800,6 +871,16 @@ export class LiveStream {
       }
 
       state.assistant.committedLength = Math.min(state.assistant.fullText.length, entry.endOffset);
+    }
+  }
+
+  private commitThinkingProgress(state: SessionState, sentEntries: StreamEntry[]): void {
+    for (const entry of sentEntries) {
+      if (entry.kind !== "service" || entry.replaceKey !== THINKING_PREFIX) {
+        continue;
+      }
+
+      state.service.thinkingCommittedLength += entry.text.length;
     }
   }
 
@@ -924,6 +1005,7 @@ export class LiveStream {
 
       state.lastSentText = prefixText;
       this.commitAssistantProgress(state, sentEntries);
+      this.commitThinkingProgress(state, sentEntries);
       if (
         state.messageId !== null &&
         sentEntries.some((entry) => entry.kind === "assistant") &&

@@ -14,12 +14,14 @@ export const ru: I18nDictionary = {
   "cmd.description.tasklist": "Список отложенных задач",
   "cmd.description.commands": "Пользовательские команды",
   "cmd.description.model": "Выбрать модель",
+  "cmd.description.costlimit": "Установить лимит стоимости сессии (USD)",
   "cmd.description.agent": "Выбрать режим агента",
   "cmd.description.cleanup": "Закрыть устаревшие темы",
   "cmd.description.opencode_start": "Запустить OpenCode сервер",
   "cmd.description.opencode_stop": "Остановить OpenCode сервер",
   "cmd.description.help": "Справка",
   "cmd.description.open": "Добавить проект через обзор папок",
+  "cmd.description.compact": "Сжать контекст сессии",
 
   "callback.unknown_command": "Неизвестная команда",
   "callback.processing_error": "Ошибка обработки",
@@ -69,10 +71,6 @@ export const ru: I18nDictionary = {
   "bot.session_created": "✅ Сессия создана: {title}",
   "bot.session_busy":
     "⏳ Предыдущий запрос все еще выполняется, поэтому новый не был запущен.\n\nПочему так: в одной сессии OpenCode обрабатывает только один активный запуск одновременно.\nЧто делать: дождитесь ответа, либо используйте /abort, если процесс завис, и отправьте сообщение снова.",
-  "bot.session_queued":
-    "📝 Ваше сообщение поставлено в очередь для этой сессии.\n\nПозиция в очереди: {position}\nЧто будет дальше: оно запустится автоматически после завершения текущего запуска.",
-  "bot.session_queue_started":
-    "▶️ Запускается следующее сообщение из очереди для этой сессии.\n\nСообщение из очереди:\n{preview}",
   "bot.session_reset_project_mismatch":
     "⚠️ Активная сессия не соответствует выбранному проекту, поэтому была сброшена. Используйте /sessions для выбора или /new для создания новой сессии.",
   "bot.prompt_send_error":
@@ -106,6 +104,8 @@ export const ru: I18nDictionary = {
   "status.line.uptime_sec": "Uptime: {seconds} сек",
   "status.line.mode": "Агент: {mode}",
   "status.line.model": "Модель: {model}",
+  "status.line.cost": "Стоимость: ${cost}",
+  "status.line.tokens": "Токены: {tokens}",
   "status.line.tts": "TTS-ответы: {tts}",
   "status.line.session_id": "ID сессии: {id}",
   "status.tts.on": "Вкл",
@@ -117,6 +117,10 @@ export const ru: I18nDictionary = {
   "status.session_selected": "📋 Текущая сессия: {title}",
   "status.session_not_selected": "📋 Текущая сессия: не выбрана",
   "status.session_hint": "Используйте /sessions для выбора или /new для создания",
+  "costlimit.invalid": "Укажите лимит в USD, например /costlimit 2.50",
+  "costlimit.no_session": "Сессия не выбрана. Сначала используйте /new или /sessions.",
+  "costlimit.set": "Лимит стоимости установлен: ${limit} USD для этой сессии.",
+  "costlimit.error": "🔴 Не удалось установить лимит стоимости.",
   "status.server_unavailable":
     "🔴 OpenCode Server недоступен\n\nИспользуйте /opencode_start для запуска сервера.",
 
@@ -318,6 +322,16 @@ export const ru: I18nDictionary = {
   "model.menu.favorites_hint":
     "ℹ️ Добавляйте модели в избранное через OpenCode CLI, чтобы они были вверху списка.",
   "model.menu.error": "🔴 Не удалось получить список моделей",
+  "model.menu.browse": "📚 Все модели:",
+  "model.menu.browse_empty": "На этой странице нет моделей",
+  "model.menu.page_indicator": "Страница {current}/{total}",
+  "model.button.all_models": "📚 Все модели",
+  "model.button.favorites": "⭐ Избранное",
+  "model.button.prev_page": "⬅️ Назад",
+  "model.button.next_page": "Вперёд ➡️",
+  "model.page_empty_callback": "На этой странице нет моделей",
+  "model.page_load_error_callback": "Не удалось загрузить эту страницу. Попробуйте снова.",
+  "model.browse_error": "🔴 Не удалось загрузить список моделей",
 
   "variant.model_not_selected_callback": "Ошибка: модель не выбрана",
   "variant.changed_callback": "Вариант изменен: {name}",

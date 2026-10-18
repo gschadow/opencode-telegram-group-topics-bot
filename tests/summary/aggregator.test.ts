@@ -22,6 +22,7 @@ describe("summary/aggregator", () => {
     mocked.getCurrentProjectMock.mockReset();
     mocked.getCurrentProjectMock.mockReturnValue({ id: "p1", worktree: "D:/repo", name: "repo" });
     summaryAggregator.clear();
+    summaryAggregator.setSessionTrackingResolver(null);
     summaryAggregator.setOnCleared(() => {});
     summaryAggregator.setOnTool(() => {});
     summaryAggregator.setOnToolFile(() => {});
@@ -140,6 +141,179 @@ describe("summary/aggregator", () => {
       ["session-1", "message-stream", "Hello"],
       ["session-1", "message-stream", "Hello world"],
     ]);
+  });
+
+  it("relays an externally initiated turn when a resolver reports the session as routed", () => {
+    const onMessageUpdated = vi.fn();
+    const onThinking = vi.fn();
+    summaryAggregator.setOnMessageUpdated(onMessageUpdated);
+    summaryAggregator.setOnThinking(onThinking);
+    summaryAggregator.setSessionTrackingResolver((sessionId) => sessionId === "routed-session");
+
+    summaryAggregator.processEvent({
+      type: "message.updated",
+      properties: {
+        info: {
+          id: "message-external",
+          sessionID: "routed-session",
+          role: "assistant",
+          time: { created: Date.now() },
+        },
+      },
+    } as unknown as Event);
+
+    summaryAggregator.processEvent({
+      type: "message.part.updated",
+      properties: {
+        part: {
+          id: "part-reasoning",
+          sessionID: "routed-session",
+          messageID: "message-external",
+          type: "reasoning",
+          text: "thinking...",
+          time: { start: Date.now() },
+        },
+      },
+    } as unknown as Event);
+
+    summaryAggregator.processEvent({
+      type: "message.part.updated",
+      properties: {
+        part: {
+          id: "part-text",
+          sessionID: "routed-session",
+          messageID: "message-external",
+          type: "text",
+          text: "final answer",
+          time: { start: Date.now() },
+        },
+      },
+    } as unknown as Event);
+
+    expect(onThinking).toHaveBeenCalledWith("routed-session", "thinking...");
+    expect(onMessageUpdated).toHaveBeenCalledWith(
+      "routed-session",
+      "message-external",
+      "final answer",
+    );
+  });
+
+  it("ignores a session when neither setSession nor the resolver tracks it", () => {
+    const onMessageUpdated = vi.fn();
+    summaryAggregator.setOnMessageUpdated(onMessageUpdated);
+    summaryAggregator.setSessionTrackingResolver(() => false);
+
+    summaryAggregator.processEvent({
+      type: "message.updated",
+      properties: {
+        info: {
+          id: "message-orphan",
+          sessionID: "orphan-session",
+          role: "assistant",
+          time: { created: Date.now() },
+        },
+      },
+    } as unknown as Event);
+
+    summaryAggregator.processEvent({
+      type: "message.part.updated",
+      properties: {
+        part: {
+          id: "part-orphan-text",
+          sessionID: "orphan-session",
+          messageID: "message-orphan",
+          type: "text",
+          text: "should not be relayed",
+          time: { start: Date.now() },
+        },
+      },
+    } as unknown as Event);
+
+    expect(onMessageUpdated).not.toHaveBeenCalled();
+  });
+
+  it("accumulates message.part.delta text instead of overwriting the message", () => {
+    const onMessageUpdated = vi.fn();
+    summaryAggregator.setOnMessageUpdated(onMessageUpdated);
+    summaryAggregator.setSession("session-1");
+
+    summaryAggregator.processEvent({
+      type: "message.updated",
+      properties: {
+        info: {
+          id: "message-delta",
+          sessionID: "session-1",
+          role: "assistant",
+          time: { created: Date.now() },
+        },
+      },
+    } as unknown as Event);
+
+    const deltas = ["Hello", " world", ", delta streamed!"];
+    for (const delta of deltas) {
+      summaryAggregator.processEvent({
+        type: "message.part.delta",
+        properties: {
+          sessionID: "session-1",
+          messageID: "message-delta",
+          partID: "part-delta-1",
+          field: "text",
+          delta,
+        },
+      } as unknown as Event);
+    }
+
+    const texts = onMessageUpdated.mock.calls.map((call) => call[2]);
+    expect(texts).toEqual(["Hello", "Hello world", "Hello world, delta streamed!"]);
+  });
+
+  it("does not duplicate delta-streamed text when the cumulative part.updated arrives", () => {
+    const onMessageUpdated = vi.fn();
+    summaryAggregator.setOnMessageUpdated(onMessageUpdated);
+    summaryAggregator.setSession("session-1");
+
+    summaryAggregator.processEvent({
+      type: "message.updated",
+      properties: {
+        info: {
+          id: "message-delta-2",
+          sessionID: "session-1",
+          role: "assistant",
+          time: { created: Date.now() },
+        },
+      },
+    } as unknown as Event);
+
+    for (const delta of ["Hello", " world"]) {
+      summaryAggregator.processEvent({
+        type: "message.part.delta",
+        properties: {
+          sessionID: "session-1",
+          messageID: "message-delta-2",
+          partID: "part-delta-2",
+          field: "text",
+          delta,
+        },
+      } as unknown as Event);
+    }
+
+    summaryAggregator.processEvent({
+      type: "message.part.updated",
+      properties: {
+        part: {
+          id: "part-delta-2",
+          sessionID: "session-1",
+          messageID: "message-delta-2",
+          type: "text",
+          text: "Hello world",
+          time: { start: Date.now(), end: Date.now() },
+        },
+      },
+    } as unknown as Event);
+
+    const lastText = onMessageUpdated.mock.calls.at(-1)?.[2];
+    expect(lastText).toBe("Hello world");
+    expect(lastText?.includes("Hello worldHello world")).toBe(false);
   });
 
   it("emits tool updates for running and error states once each", () => {

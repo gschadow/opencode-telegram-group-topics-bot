@@ -1,11 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, Context } from "grammy";
-import {
-  __resetQueuedPromptsForTests,
-  consumePromptResponseMode,
-  dispatchNextQueuedPrompt,
-  processUserPrompt,
-} from "../../../src/bot/handlers/prompt.js";
+import { consumePromptResponseMode, processUserPrompt } from "../../../src/bot/handlers/prompt.js";
 import { t } from "../../../src/i18n/index.js";
 
 const mocked = vi.hoisted(() => ({
@@ -161,6 +156,13 @@ function createContext(): Context {
     chat: {
       id: -100123,
       type: "supergroup",
+      title: "Test Group",
+    },
+    from: {
+      id: 42,
+      first_name: "Gunther",
+      last_name: "Schadow",
+      username: "gschadow",
     },
     message: {
       text: "Test",
@@ -172,7 +174,6 @@ function createContext(): Context {
 
 describe("bot/handlers/prompt", () => {
   beforeEach(() => {
-    __resetQueuedPromptsForTests();
     mocked.getCurrentProjectMock.mockReset();
     mocked.isTtsEnabledMock.mockReset();
     mocked.getScheduledTaskTopicByChatAndThreadMock.mockReset();
@@ -251,9 +252,9 @@ describe("bot/handlers/prompt", () => {
     expect(mocked.getCurrentProjectMock).not.toHaveBeenCalled();
   });
 
-  it("queues prompts while the current session is busy and dispatches them on idle", async () => {
+  it("submits prompts directly while the session is busy (mid-turn injection)", async () => {
     mocked.getScheduledTaskTopicByChatAndThreadMock.mockResolvedValue(null);
-    mocked.sessionStatusMock.mockResolvedValueOnce({
+    mocked.sessionStatusMock.mockResolvedValue({
       data: { "session-1": { type: "busy" } },
       error: null,
     });
@@ -277,26 +278,16 @@ describe("bot/handlers/prompt", () => {
     );
 
     expect(result).toBe(true);
-    expect(ctx.reply).toHaveBeenCalledWith(t("bot.session_queued", { position: "1" }));
-    expect(mocked.sessionPromptAsyncMock).not.toHaveBeenCalled();
-
-    mocked.sessionStatusMock.mockResolvedValueOnce({
-      data: { "session-1": { type: "idle" } },
-      error: null,
-    });
-
-    const dispatched = await dispatchNextQueuedPrompt("session-1");
-
-    expect(dispatched).toBe(true);
-    expect(bot.api.sendMessage).toHaveBeenCalledWith(
-      -100123,
-      t("bot.session_queue_started", { preview: "Test" }),
-      { message_thread_id: 555 },
-    );
+    expect(ctx.reply).not.toHaveBeenCalledWith(t("bot.session_queued", { position: "1" }));
     expect(mocked.sessionPromptAsyncMock).toHaveBeenCalledWith({
       sessionID: "session-1",
       directory: "/repo/app",
-      parts: [{ type: "text", text: "Test" }],
+      parts: [
+        {
+          type: "text",
+          text: '[Telegram] Gunther Schadow (@gschadow) says through group "Test Group", chat id -100123, thread 555:\n\nTest',
+        },
+      ],
       agent: "builder",
       model: { providerID: "openai", modelID: "gpt-5" },
       variant: "fast",
@@ -317,5 +308,26 @@ describe("bot/handlers/prompt", () => {
 
     expect(consumePromptResponseMode("session-1")).toBe("text_and_tts");
     expect(mocked.isTtsEnabledMock).toHaveBeenCalledWith();
+  });
+
+  it("prepends the sender origin header to the prompt text", async () => {
+    mocked.getScheduledTaskTopicByChatAndThreadMock.mockResolvedValue(null);
+
+    const ctx = createContext();
+    await processUserPrompt(ctx, "Show me the picture", {
+      bot: {} as Bot<Context>,
+      ensureEventSubscription: vi.fn(),
+    });
+
+    expect(mocked.sessionPromptAsyncMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parts: [
+          {
+            type: "text",
+            text: '[Telegram] Gunther Schadow (@gschadow) says through group "Test Group", chat id -100123, thread 555:\n\nShow me the picture',
+          },
+        ],
+      }),
+    );
   });
 });

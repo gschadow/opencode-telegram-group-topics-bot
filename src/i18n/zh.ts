@@ -14,12 +14,14 @@ export const zh: I18nDictionary = {
   "cmd.description.tasklist": "列出定时任务",
   "cmd.description.commands": "自定义命令",
   "cmd.description.model": "选择模型",
+  "cmd.description.costlimit": "设置会话成本上限（美元）",
   "cmd.description.agent": "选择代理",
   "cmd.description.cleanup": "关闭过期话题",
   "cmd.description.opencode_start": "启动 OpenCode 服务器",
   "cmd.description.opencode_stop": "停止 OpenCode 服务器",
   "cmd.description.help": "帮助",
   "cmd.description.open": "通过浏览目录添加项目",
+  "cmd.description.compact": "压缩会话上下文",
 
   "callback.unknown_command": "未知命令",
   "callback.processing_error": "处理错误",
@@ -63,10 +65,6 @@ export const zh: I18nDictionary = {
   "bot.session_created": "✅ 会话已创建：{title}",
   "bot.session_busy":
     "⏳ 你上一条请求还在执行，所以这条新请求没有启动。\n\n原因：OpenCode 在同一个会话里一次只允许一个运行中的任务。\n建议：先等待当前回复；如果看起来卡住了，先用 /abort，再重新发送消息。",
-  "bot.session_queued":
-    "📝 这条消息已加入当前会话的队列。\n\n队列位置：{position}\n接下来会发生什么：当前运行结束后，它会自动开始。",
-  "bot.session_queue_started":
-    "▶️ 正在开始处理这个会话中的下一条排队消息。\n\n排队消息：\n{preview}",
   "bot.session_reset_project_mismatch":
     "⚠️ 活动会话与所选项目不匹配，因此已重置。使用 /sessions 选择一个会话，或 /new 创建新会话。",
   "bot.prompt_send_error":
@@ -98,6 +96,8 @@ export const zh: I18nDictionary = {
   "status.line.uptime_sec": "运行时间：{seconds} 秒",
   "status.line.mode": "代理：{mode}",
   "status.line.model": "模型：{model}",
+  "status.line.cost": "成本：${cost}",
+  "status.line.tokens": "Tokens：{tokens}",
   "status.line.tts": "TTS 回复：{tts}",
   "status.line.session_id": "会话 ID：{id}",
   "status.tts.on": "开启",
@@ -109,6 +109,10 @@ export const zh: I18nDictionary = {
   "status.session_selected": "📋 当前会话：{title}",
   "status.session_not_selected": "📋 当前会话：未选择",
   "status.session_hint": "使用 /sessions 选择一个会话，或 /new 创建",
+  "costlimit.invalid": "请提供美元限额，例如 /costlimit 2.50",
+  "costlimit.no_session": "尚未选择会话。请先使用 /new 或 /sessions。",
+  "costlimit.set": "已为此会话设置成本上限：${limit} 美元。",
+  "costlimit.error": "🔴 设置成本上限失败。",
   "status.server_unavailable": "🔴 OpenCode 服务器不可用\n\n使用 /opencode_start 启动服务器。",
 
   "tts.enabled": "🔊 已全局启用语音回复。",
@@ -281,6 +285,16 @@ export const zh: I18nDictionary = {
   "model.menu.recent_empty": "— 列表为空。",
   "model.menu.favorites_hint": "ℹ️ 可在 OpenCode CLI 中将模型加入收藏，使其显示在列表顶部。",
   "model.menu.error": "🔴 获取模型列表失败",
+  "model.menu.browse": "📚 所有模型：",
+  "model.menu.browse_empty": "此页没有模型",
+  "model.menu.page_indicator": "第 {current}/{total} 页",
+  "model.button.all_models": "📚 所有模型",
+  "model.button.favorites": "⭐ 收藏",
+  "model.button.prev_page": "⬅️ 上一页",
+  "model.button.next_page": "下一页 ➡️",
+  "model.page_empty_callback": "此页没有模型",
+  "model.page_load_error_callback": "无法加载此页面。请重试。",
+  "model.browse_error": "🔴 加载模型列表失败",
 
   "variant.model_not_selected_callback": "错误：未选择模型",
   "variant.changed_callback": "变体已更改：{name}",
