@@ -1,4 +1,4 @@
-import { Event, ToolState } from "@opencode-ai/sdk/v2";
+import type { Event, ToolState } from "../opencode/v1-types.js";
 import type { CodeFileData } from "./formatter.js";
 import { normalizePathForDisplay, prepareCodeFile } from "./formatter.js";
 import type { Question } from "../question/types.js";

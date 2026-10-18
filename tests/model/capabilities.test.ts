@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { supportsInput, supportsAttachment } from "../../src/model/capabilities.js";
-import type { Model } from "@opencode-ai/sdk/v2";
+import type { Model } from "../../src/opencode/v1-types.js";
 
 describe("model/capabilities", () => {
   describe("supportsInput", () => {

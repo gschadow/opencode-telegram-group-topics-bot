@@ -1,6 +1,6 @@
 import { opencodeClient } from "../opencode/client.js";
 import { logger } from "../utils/logger.js";
-import type { Model } from "@opencode-ai/sdk/v2";
+import type { Model } from "../opencode/v1-types.js";
 
 interface ModelCapabilitiesCache {
   [key: string]: Model["capabilities"] | null;

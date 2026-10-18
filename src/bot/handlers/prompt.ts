@@ -1,6 +1,6 @@
 import { access } from "node:fs/promises";
 import { Bot, Context } from "grammy";
-import type { FilePartInput, TextPartInput } from "@opencode-ai/sdk/v2";
+import type { FilePartInput, TextPartInput } from "../../opencode/v1-types.js";
 import { opencodeClient, sessionCreateInDirectory } from "../../opencode/client.js";
 import { classifyPromptSubmitError } from "../../opencode/prompt-submit-error.js";
 import { clearSession, getCurrentSession, setCurrentSession } from "../../session/manager.js";

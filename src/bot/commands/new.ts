@@ -43,7 +43,7 @@ import {
 } from "../constants.js";
 import { INTERACTION_CLEAR_REASON } from "../../interaction/constants.js";
 import { buildTopicMessageLink } from "../utils/topic-link.js";
-import type { TextPartInput } from "@opencode-ai/sdk/v2";
+import type { TextPartInput } from "../../opencode/v1-types.js";
 import {
   activatePromptResponseMode,
   clearPromptResponseMode,

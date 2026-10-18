@@ -98,7 +98,7 @@ import {
   getThreadSendOptions,
 } from "./scope.js";
 import { TelegramRateLimiter } from "./telegram-rate-limiter.js";
-import type { Event as OpenCodeEvent, FilePartInput } from "@opencode-ai/sdk/v2";
+import type { Event as OpenCodeEvent, FilePartInput } from "../opencode/v1-types.js";
 import { getSessionRouteTarget, listAllTopicBindings } from "../topic/manager.js";
 import { BOT_COMMAND, DM_ALLOWED_COMMANDS } from "./commands/constants.js";
 import { INTERACTION_CLEAR_REASON } from "../interaction/constants.js";
@@ -122,7 +122,10 @@ const initializedCommandChats = new Set<number>();
 const renamedGeneralTopicChats = new Set<number>();
 const DM_ALLOWED_COMMAND_SET = new Set<string>(DM_ALLOWED_COMMANDS);
 const telegramRateLimiter = new TelegramRateLimiter();
-const eventCallbackByDirectory = new Map<string, (event: OpenCodeEvent) => void>();
+// v2 exposes a single global event stream. The bot registers one callback for
+// every project directory; the events layer deduplicates identical callbacks
+// so a global event is dispatched (and aggregated) exactly once.
+let sharedEventCallback: ((event: OpenCodeEvent) => void) | null = null;
 
 async function ensureGeneralTopicName(ctx: Context): Promise<void> {
   if (!ctx.chat || ctx.chat.type === CHAT_TYPE.PRIVATE) {
@@ -1178,10 +1181,8 @@ async function ensureEventSubscription(directory: string): Promise<void> {
     pinnedMessageManager.addFileChange(change, target.scopeKey);
   });
 
-  let eventCallback = eventCallbackByDirectory.get(directory);
-
-  if (!eventCallback) {
-    eventCallback = (event: OpenCodeEvent): void => {
+  if (!sharedEventCallback) {
+    sharedEventCallback = (event: OpenCodeEvent): void => {
       if (event.type === "session.created" || event.type === "session.updated") {
         const info = (
           event.properties as { info?: { directory?: string; time?: { updated?: number } } }
@@ -1260,10 +1261,10 @@ async function ensureEventSubscription(directory: string): Promise<void> {
       summaryAggregator.processEvent(event);
     };
 
-    eventCallbackByDirectory.set(directory, eventCallback);
-    logger.info(`[Bot] Subscribing to OpenCode events for project: ${directory}`);
+    logger.info("[Bot] Registered OpenCode event callback");
   }
 
+  const eventCallback = sharedEventCallback;
   subscribeToEvents(directory, eventCallback).catch((err) => {
     logger.error("Failed to subscribe to events:", err);
   });
@@ -1920,7 +1921,7 @@ export function cleanupBotRuntime(reason: string): void {
   summaryAggregator.clear();
   sessionOutputCoordinator.clearAll();
   void liveStream.clearAll(reason);
-  eventCallbackByDirectory.clear();
+  sharedEventCallback = null;
   stopEventListening();
   initializedCommandChats.clear();
   renamedGeneralTopicChats.clear();

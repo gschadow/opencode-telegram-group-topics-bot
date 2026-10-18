@@ -22,7 +22,7 @@ This repo is a fork of `grinev/opencode-telegram-bot` with group-topics support 
 
 - `grammy` - Telegram Bot API framework (https://grammy.dev/)
 - `@grammyjs/menu` - inline keyboards and menus
-- `@opencode-ai/sdk` - official OpenCode Server SDK
+- `@opencode/client` - official OpenCode v2 client SDK (the bot adapts its v1-shaped call surface in `src/opencode/client.ts`)
 - `dotenv` - environment variable loading
 
 ### Test dependencies
@@ -180,31 +180,33 @@ Important:
 
 ## OpenCode SDK quick reference
 
+The bot talks to an OpenCode **v2** server, which serves only `/api/*` and
+requires Basic auth. It uses `@opencode/client` directly and adapts responses
+and events to the v1 shapes the rest of the bot expects.
+
 ```typescript
-import { createOpencodeClient } from "@opencode-ai/sdk";
+import { OpenCode } from "@opencode/client/promise";
 
-const client = createOpencodeClient({ baseUrl: "http://localhost:4096" });
-
-await client.global.health();
-
-await client.project.list();
-await client.project.current();
-
-await client.session.list();
-await client.session.create({ body: { title: "My session" } });
-await client.session.prompt({
-  path: { id: "session-id" },
-  body: { parts: [{ type: "text", text: "Implement feature X" }] },
+const client = OpenCode.make({
+  baseUrl: "http://127.0.0.1:4096",
+  headers: { Authorization: "Basic ..." },
 });
-await client.session.abort({ path: { id: "session-id" } });
 
-const events = await client.event.subscribe();
-for await (const event of events.stream) {
-  // handle SSE event
+await client.server.info();
+await client.session.list({ limit: 20, location: { directory } });
+await client.session.create({ title: "My session", location: { directory } });
+await client.session.prompt({ sessionID, text: "Implement feature X" });
+await client.session.interrupt({ sessionID });
+
+for await (const event of client.event.subscribe({ signal })) {
+  // v2 event: { type, data, ... }
 }
 ```
 
-Full docs: https://opencode.ai/docs/sdk
+All of this is wrapped by `src/opencode/client.ts` (`opencodeClient`) and
+`src/opencode/events.ts` (`subscribeToEvents`), which translate to the v1
+`{ data, error }` result shape and `{ type, properties }` events. Prefer those
+wrappers over calling `v2Client` directly.
 
 ## Workflow
 

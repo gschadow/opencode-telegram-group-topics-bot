@@ -1,5 +1,5 @@
 import { CommandContext, Context } from "grammy";
-import { fetchServerInfo, opencodeClient } from "../../opencode/client.js";
+import { fetchServerInfo } from "../../opencode/client.js";
 import { processManager } from "../../process/manager.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";

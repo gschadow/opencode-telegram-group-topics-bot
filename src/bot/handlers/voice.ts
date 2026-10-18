@@ -8,7 +8,7 @@ import {
   removeDownloadedFile,
   type DownloadedFile,
 } from "../utils/file-download.js";
-import type { FilePartInput } from "@opencode-ai/sdk/v2";
+import type { FilePartInput } from "../../opencode/v1-types.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
 

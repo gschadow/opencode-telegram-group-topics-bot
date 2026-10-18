@@ -14,7 +14,7 @@ import { getModelCapabilities, supportsInput } from "../../model/capabilities.js
 import { getStoredModel } from "../../model/manager.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
-import type { FilePartInput, Model } from "@opencode-ai/sdk/v2";
+import type { FilePartInput, Model } from "../../opencode/v1-types.js";
 
 export interface DocumentHandlerDeps extends ProcessPromptDeps {
   downloadFile?: (
