@@ -1,4 +1,7 @@
 import dotenv from "dotenv";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { getRuntimePaths } from "./runtime/paths.js";
 import { normalizeLocale, type Locale } from "./i18n/index.js";
 
@@ -6,6 +9,21 @@ const runtimePaths = getRuntimePaths();
 dotenv.config({ path: runtimePaths.envFilePath, quiet: true });
 
 export type MessageFormatMode = "raw" | "markdown";
+
+// The local opencode server writes its password to ~/.config/opencode/server.env
+// (`opencode serve --service`). Read it so the bot authenticates without
+// duplicating the secret into its own .env.
+function storedServerPassword(): string {
+  try {
+    const dir = process.env.OPENCODE_CONFIG_DIR || join(homedir(), ".config", "opencode");
+    for (const line of readFileSync(join(dir, "server.env"), "utf8").split("\n"))
+      for (const name of ["OPENCODE_PASSWORD", "OPENCODE_SERVER_PASSWORD"])
+        if (line.startsWith(`${name}=`)) return line.slice(name.length + 1).trim();
+  } catch {
+    // no stored password; behave as before
+  }
+  return "";
+}
 
 function getEnvVar(key: string, required: boolean = true): string {
   const value = process.env[key];
@@ -103,7 +121,7 @@ export const config = {
   opencode: {
     apiUrl: getEnvVar("OPENCODE_API_URL", false) || "http://localhost:4096",
     username: getEnvVar("OPENCODE_SERVER_USERNAME", false) || "opencode",
-    password: getEnvVar("OPENCODE_SERVER_PASSWORD", false),
+    password: getEnvVar("OPENCODE_SERVER_PASSWORD", false) || storedServerPassword(),
     model: {
       provider: getEnvVar("OPENCODE_MODEL_PROVIDER", true), // Required
       modelId: getEnvVar("OPENCODE_MODEL_ID", true), // Required

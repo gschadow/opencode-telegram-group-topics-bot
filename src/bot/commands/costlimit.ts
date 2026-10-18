@@ -4,6 +4,7 @@ import { getCurrentSession } from "../../session/manager.js";
 import { getScopeKeyFromContext } from "../scope.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
+import { pinnedMessageManager } from "../../pinned/manager.js";
 
 // The generated v2 SDK Session type omits `metadata`/`cost` even though the
 // server returns them (packages/opencode/src/session/session.ts `Session.Info`).
@@ -45,6 +46,10 @@ export async function costLimitCommand(ctx: CommandContext<Context>) {
       `[CostLimit] Set budget maxCost=${limit} for session ${currentSession.id} (${currentSession.title})`,
     );
     await ctx.reply(t("costlimit.set", { limit: limit.toFixed(2) }));
+    // Refresh the pinned panel so it shows the new cost limit.
+    void pinnedMessageManager
+      .loadContextFromHistory(currentSession.id, currentSession.directory, scopeKey)
+      .catch(() => {});
   } catch (error) {
     logger.error("[CostLimit] Failed to set cost limit:", error);
     await ctx.reply(t("costlimit.error"));

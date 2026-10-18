@@ -193,6 +193,14 @@ class PinnedMessageManager {
 
       context.state.tokensUsed = summaryIsMostRecent ? lastRawContextSize : maxContextSize;
       context.state.assistantCost = totalAssistantCost;
+      try {
+        const { data: sessionInfo } = await opencodeClient.session.get({ sessionID: sessionId, directory });
+        const budget = (sessionInfo as { metadata?: { budget?: { maxCost?: number } } } | undefined)?.metadata
+          ?.budget;
+        context.state.costLimit = typeof budget?.maxCost === "number" ? budget.maxCost : undefined;
+      } catch {
+        // Budget metadata is optional; leave the previous limit untouched.
+      }
       context.state.sessionId = sessionId;
       this.syncSharedContext(scopeKey);
       await this.updatePinnedMessage(scopeKey);
@@ -518,7 +526,12 @@ class PinnedMessageManager {
         limit: this.formatTokenCount(state.tokensLimit),
         percent: percentage,
       }),
-      t("pinned.line.cost", { cost: this.formatCost(state.assistantCost) }),
+      t("pinned.line.cost", {
+        cost:
+          state.costLimit !== undefined
+            ? `${this.formatCost(state.assistantCost)} / ${this.formatCost(state.costLimit)}`
+            : this.formatCost(state.assistantCost),
+      }),
     ];
 
     if (state.changedFiles.length > 0) {
